@@ -1,10 +1,8 @@
 /**
  * Phaser 3 Config for WorldSim
  * ----------------------------
- * Uses the AUTO renderer (WebGL preferred, Canvas fallback).
- * The IsoScene is injected at runtime.
+ * pixelArt mode + device-pixel-ratio resolution = crisp pixel fonts.
  */
-
 import Phaser from 'phaser'
 
 export const PHASER_CONFIG: Phaser.Types.Core.GameConfig = {
@@ -16,7 +14,8 @@ export const PHASER_CONFIG: Phaser.Types.Core.GameConfig = {
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   render: {
-    antialias: true,
-    pixelArt: false,
+    antialias: false,          // off → pixel-crisp edges
+    pixelArt: true,            // no texture smoothing
+    roundPixels: true,         // snap to whole pixels
   },
 }

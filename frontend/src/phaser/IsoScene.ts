@@ -157,15 +157,15 @@ const LAYOUTS: Record<string, NLayout> = {
 }
 
 const NATION_HEADER: Record<string, { line1:string; line2:string; line3:string }> = {
-  AQUILONIA:  { line1:'💧 AQUILONIA',  line2:'Water Dominance',   line3:'Hoard & Defend'    },
-  VERDANTIS:  { line1:'🌾 VERDANTIS',  line2:'Food Surplus',      line3:'Balance All 4'     },
-  IGNIS_CORE: { line1:'⚡ IGNIS CORE', line2:'Energy Powerhouse', line3:'Expand & Burn'     },
-  TERRANOVA:  { line1:'🪨 TERRANOVA',  line2:'Vast Landmass',     line3:'Conflict & Steal'  },
-  THE_NEXUS:  { line1:'⚖️ THE NEXUS',  line2:'Balanced Hub',      line3:'Trade & Stability' },
+  AQUILONIA:  { line1:'💧 THE HOARDER',      line2:'Water Dominance',   line3:'Hoard & Defend'    },
+  VERDANTIS:  { line1:'🌾 THE SUSTAINIST',   line2:'Food Surplus',      line3:'Balance All 4'     },
+  IGNIS_CORE: { line1:'⚡ THE INDUSTRIALIST',line2:'Energy Powerhouse', line3:'Expand & Burn'     },
+  TERRANOVA:  { line1:'🪨 THE OPPORTUNIST',  line2:'Vast Landmass',     line3:'Conflict & Steal'  },
+  THE_NEXUS:  { line1:'⚖️ THE INTEGRATOR',  line2:'Balanced Hub',      line3:'Trade & Stability' },
 }
 
 const PRESIDENT_NAMES: Record<string, string> = {
-  AQUILONIA:'Pres. Aldric', VERDANTIS:'Pres. Sylvara', IGNIS_CORE:'Pres. Ignar', TERRANOVA:'Pres. Vorn', THE_NEXUS:'Pres. Aura',
+  AQUILONIA:'The_Hoarder', VERDANTIS:'The_Sustainist', IGNIS_CORE:'The_Industrialist', TERRANOVA:'The_Opportunist', THE_NEXUS:'The_Integrator',
 }
 
 const RES_KEYS  = ['water','food','energy','land'] as const
@@ -188,6 +188,7 @@ export class IsoScene extends Phaser.Scene {
   private particleGfx!:  Phaser.GameObjects.Graphics  // particles (TNT, minecart, weather)
   private resBarGfx!:    Phaser.GameObjects.Graphics  // resource bars
   private overlayGfx!:   Phaser.GameObjects.Graphics  // crime halos, dominance rings
+  private climateGfx!:   Phaser.GameObjects.Graphics  // climate calamity panel (no-man's-land)
 
   private nameLine1:    Map<string,Phaser.GameObjects.Text> = new Map()
   private nameLine2:    Map<string,Phaser.GameObjects.Text> = new Map()
@@ -197,6 +198,13 @@ export class IsoScene extends Phaser.Scene {
   private actionLabels: Map<string,Phaser.GameObjects.Text> = new Map()
   private resIconLbls:  Map<string,Phaser.GameObjects.Text> = new Map()
   private resPctLbls:   Map<string,Phaser.GameObjects.Text> = new Map()
+
+  // Climate panel texts (in no-man's-land)
+  private climateIcon!:   Phaser.GameObjects.Text
+  private climateName!:   Phaser.GameObjects.Text
+  private climateDesc!:   Phaser.GameObjects.Text
+  private climateSub!:    Phaser.GameObjects.Text
+  private climateTicks!:  Phaser.GameObjects.Text
 
   private phase   = 0
   private regions: RegionState[] = []
@@ -219,8 +227,10 @@ export class IsoScene extends Phaser.Scene {
     this.particleGfx = this.add.graphics()
     this.resBarGfx   = this.add.graphics()
     this.overlayGfx  = this.add.graphics()
+    this.climateGfx  = this.add.graphics()
     this._drawVoxelScene(W, H)
     this._createLabels(W, H)
+    this._createClimatePanel(W, H)
     this.scale.on('resize', (_:unknown, gs:Phaser.Structs.Size) => this._onResize(gs.width, gs.height))
     this._unsub = useWorldStore.subscribe(s => { this.regions=s.regions; this.climate=s.climateEvent })
   }
@@ -238,6 +248,7 @@ export class IsoScene extends Phaser.Scene {
     this._drawResourceBars(W,H)
     this._drawOverlays(W,H)
     this._updateLabels(W,H)
+    this._drawClimatePanel(W,H)
   }
 
   shutdown(){ this._unsub?.(); this._unsub=null }
@@ -333,40 +344,42 @@ export class IsoScene extends Phaser.Scene {
   // ── Labels ─────────────────────────────────────────────────────────────────
 
   private _createLabels(W:number, H:number){
+    const RES = window.devicePixelRatio || 1
+    const FONT = '"Press Start 2P",monospace'
     for(const id of Object.keys(LAYOUTS)){
       const l=LAYOUTS[id], nh=NATION_HEADER[id]
       const cx=(l.fx+l.fw/2)*W, ty=l.fy*H
 
       this.nameLine1.set(id, this.add.text(cx,ty+8,nh.line1,
-        {fontSize:'10px',fontFamily:'"Press Start 2P",monospace',color:l.labelCol,stroke:'#000',strokeThickness:3}
+        {fontSize:'11px',fontFamily:FONT,color:l.labelCol,stroke:'#000',strokeThickness:3,resolution:RES}
       ).setOrigin(0.5,0).setDepth(50))
 
-      this.nameLine2.set(id, this.add.text(cx,ty+24,nh.line2,
-        {fontSize:'7px',fontFamily:'"Press Start 2P",monospace',color:l.labelCol,stroke:'#000',strokeThickness:2}
+      this.nameLine2.set(id, this.add.text(cx,ty+26,nh.line2,
+        {fontSize:'8px',fontFamily:FONT,color:l.labelCol,stroke:'#000',strokeThickness:2,resolution:RES}
       ).setOrigin(0.5,0).setDepth(50))
 
-      this.nameLine3.set(id, this.add.text(cx,ty+36,nh.line3,
-        {fontSize:'6px',fontFamily:'"Press Start 2P",monospace',color:'#888',stroke:'#000',strokeThickness:2}
+      this.nameLine3.set(id, this.add.text(cx,ty+40,nh.line3,
+        {fontSize:'8px',fontFamily:FONT,color:'#778899',stroke:'#000',strokeThickness:2,resolution:RES}
       ).setOrigin(0.5,0).setDepth(50))
 
-      this.presLabels.set(id, this.add.text(cx,ty+50,PRESIDENT_NAMES[id]??'',
-        {fontSize:'6px',fontFamily:'"Press Start 2P",monospace',color:'#667788',stroke:'#000',strokeThickness:2}
+      this.presLabels.set(id, this.add.text(cx,ty+54,PRESIDENT_NAMES[id]??'',
+        {fontSize:'8px',fontFamily:FONT,color:'#556677',stroke:'#000',strokeThickness:2,resolution:RES}
       ).setOrigin(0.5,0).setDepth(50))
 
-      this.crimeLabels.set(id, this.add.text(cx,ty+62,'',
-        {fontSize:'7px',fontFamily:'"Press Start 2P",monospace',color:'#ff5544',stroke:'#000',strokeThickness:2}
+      this.crimeLabels.set(id, this.add.text(cx,ty+68,'',
+        {fontSize:'8px',fontFamily:FONT,color:'#ff5544',stroke:'#000',strokeThickness:2,resolution:RES}
       ).setOrigin(0.5,0).setDepth(50))
 
       this.actionLabels.set(id, this.add.text(cx,ty+l.fh*H-8,'',
-        {fontSize:'7px',fontFamily:'"Press Start 2P",monospace',color:'#ffdd44',stroke:'#000',strokeThickness:3}
+        {fontSize:'9px',fontFamily:FONT,color:'#ffdd44',stroke:'#000',strokeThickness:3,resolution:RES}
       ).setOrigin(0.5,1).setDepth(50))
 
       for(let i=0;i<4;i++){
         this.resIconLbls.set(`${id}_${i}`, this.add.text(0,0,RES_LABEL[i],
-          {fontSize:'6px',fontFamily:'"Press Start 2P",monospace',color:RES_STR[i],stroke:'#000',strokeThickness:2}
+          {fontSize:'8px',fontFamily:FONT,color:RES_STR[i],stroke:'#000',strokeThickness:2,resolution:RES}
         ).setOrigin(0,0.5).setDepth(55))
         this.resPctLbls.set(`${id}_${i}`, this.add.text(0,0,'0%',
-          {fontSize:'6px',fontFamily:'"Press Start 2P",monospace',color:RES_STR[i],stroke:'#000',strokeThickness:2}
+          {fontSize:'8px',fontFamily:FONT,color:RES_STR[i],stroke:'#000',strokeThickness:2,resolution:RES}
         ).setOrigin(1,0.5).setDepth(55))
       }
     }
@@ -467,19 +480,37 @@ export class IsoScene extends Phaser.Scene {
 
       const ca=this._regionCenter(a,W,H), cb=this._regionCenter(b,W,H)
 
-      // Beam
-      g.lineStyle(8,0x44ccff,alpha*0.08); g.lineBetween(ca.x,ca.y,cb.x,cb.y)
-      g.lineStyle(2,0x88eeff,alpha*0.4);  g.lineBetween(ca.x,ca.y,cb.x,cb.y)
-      g.lineStyle(1,0xeeffff,alpha*0.9);  g.lineBetween(ca.x,ca.y,cb.x,cb.y)
+      // Resource color: pick the most abundant resource of whichever nation is trading
+      // This reflects the resource being offered/shared across the beam
+      const traderA = this.regions.find(r=>r.id===a)
+      const traderB = this.regions.find(r=>r.id===b)
+      const maxRes = (r: RegionState|undefined): {idx:number; val:number} => {
+        if(!r) return {idx:0,val:0}
+        const vals = [r.resources.water, r.resources.food, r.resources.energy, r.resources.land]
+        const mx   = Math.max(...vals)
+        return {idx:vals.indexOf(mx), val:mx}
+      }
+      const resA=maxRes(traderA), resB=maxRes(traderB)
+      // Prefer the trading nation's resource; fallback to first
+      const beamResIdx = tradeSet.has(a) ? resA.idx : resB.idx
+      const beamColHex = RES_COLS[beamResIdx]   // e.g. 0x2aafcc for water
+      const beamColStr = RES_STR[beamResIdx]    // e.g. '#2aafcc'
 
-      // Voxel minecart squares travelling along beam
+      // Beam — wide glow + thin bright core in resource color
+      g.lineStyle(10, beamColHex, alpha*0.07); g.lineBetween(ca.x,ca.y,cb.x,cb.y)
+      g.lineStyle(3,  beamColHex, alpha*0.35); g.lineBetween(ca.x,ca.y,cb.x,cb.y)
+      g.lineStyle(1,  beamColHex, alpha*0.95); g.lineBetween(ca.x,ca.y,cb.x,cb.y)
+
+      // Voxel minecart squares in resource color, travelling along beam
       for(let si=0;si<4;si++){
         const t=((this.phase*0.5+si/4)%1)
         const mx=lerp(ca.x,cb.x,t), my=lerp(ca.y,cb.y,t)
-        g.fillStyle(0xaa7722,alpha*0.9); g.fillRect(mx-4,my-3,8,5)
-        g.lineStyle(1,0xffcc44,alpha*0.7); g.strokeRect(mx-4,my-3,8,5)
-        g.fillStyle(0xddcc44,alpha); g.fillRect(mx-2,my+2,3,2); g.fillRect(mx+1,my+2,3,2)
+        g.fillStyle(beamColHex,alpha*0.85); g.fillRect(mx-4,my-3,8,5)
+        g.lineStyle(1,0xffffff,alpha*0.5); g.strokeRect(mx-4,my-3,8,5)
+        // Wheels
+        g.fillStyle(0xffffff,alpha*0.7); g.fillRect(mx-2,my+2,3,2); g.fillRect(mx+1,my+2,3,2)
       }
+      void beamColStr  // suppress unused warning if needed
     }
 
     // TNT conflict flash on targets
@@ -645,6 +676,118 @@ export class IsoScene extends Phaser.Scene {
     }
   }
 
+  // ── Climate Calamity Panel (Top-Centre No Man's Land) ─────────────────────
+
+  // Top-centre gap: X 33%–67%, Y 2%–24% of canvas
+  // (between Aquilonia left-tile and Verdantis right-tile, above Ignis Core)
+  private _panelCX(W:number){ return W * 0.50 }
+  private _panelCY(H:number){ return H * 0.13 }
+
+  private readonly CLIMATE_INFO: Record<string,{
+    icon:string; name:string; col:number; colStr:string
+    desc:string; sub:string; affects:string
+  }> = {
+    Drought: {
+      icon: '☀️', name: 'DROUGHT',
+      col: 0xff9933, colStr: '#ff9933',
+      desc: 'Extreme heat scorches the land.\nWater reserves drain 2× faster.\nCrop yields drop by 20% each tick.',
+      sub: 'Rivers are drying up. Reservoirs at critical levels.',
+      affects: 'Affects: All Nations — 💧 Water −2×  🌾 Food −20%',
+    },
+    SolarFlare: {
+      icon: '🌞', name: 'SOLAR FLARE',
+      col: 0xffee44, colStr: '#ffee44',
+      desc: 'Massive EM pulse from the sun.\nEnergy grids disrupted — output −30%.\nCrime spikes as power fails.',
+      sub: 'Communication networks offline. Trade disrupted.',
+      affects: 'Affects: All Nations — ⚡ Energy −30%  ⚠ Crime +15%',
+    },
+    Blight: {
+      icon: '☣️', name: 'BLIGHT',
+      col: 0xcc44ff, colStr: '#cc44ff',
+      desc: 'Fungal plague spreads through crops.\nVerdantis farmlands contaminated.\nFood exports halted world-wide.',
+      sub: 'Mycelium spreading rapidly. Quarantine advised.',
+      affects: 'Affects: Verdantis worst — 🌾 Food −40%  All: −10%',
+    },
+  }
+
+  private _createClimatePanel(W:number, H:number){
+    const cx = this._panelCX(W), cy = this._panelCY(H)
+    const FONT = '"Press Start 2P",monospace'
+    const RES  = window.devicePixelRatio || 1
+
+    this.climateIcon  = this.add.text(cx, cy-44, '', { fontSize:'26px', fontFamily:FONT, resolution:RES }).setOrigin(0.5).setDepth(80)
+    this.climateName  = this.add.text(cx, cy-12, '', { fontSize:'11px', fontFamily:FONT, color:'#fff', stroke:'#000', strokeThickness:3, fontStyle:'bold', resolution:RES }).setOrigin(0.5).setDepth(80)
+    this.climateDesc  = this.add.text(cx, cy+10, '', { fontSize:'8px',  fontFamily:FONT, color:'#ddd', stroke:'#000', strokeThickness:2, align:'center', wordWrap:{width:W*0.29}, resolution:RES }).setOrigin(0.5,0).setDepth(80)
+    this.climateSub   = this.add.text(cx, cy+54, '', { fontSize:'8px',  fontFamily:FONT, color:'#aaa', stroke:'#000', strokeThickness:2, align:'center', wordWrap:{width:W*0.28}, resolution:RES }).setOrigin(0.5,0).setDepth(80)
+    this.climateTicks = this.add.text(cx, cy+72, '', { fontSize:'8px',  fontFamily:FONT, color:'#888', stroke:'#000', strokeThickness:2, align:'center', resolution:RES }).setOrigin(0.5,0).setDepth(80)
+  }
+
+  private _drawClimatePanel(W:number, H:number){
+    const g = this.climateGfx; g.clear()
+    const ct = this.climate?.type
+    const cx = this._panelCX(W), cy = this._panelCY(H)
+
+    if(!ct){
+      // Hide all texts
+      ;[this.climateIcon,this.climateName,this.climateDesc,this.climateSub,this.climateTicks].forEach(t=>{ t?.setVisible(false) })
+      // Subtle "no event" label
+      g.fillStyle(0x0a0e18,0.6)
+      g.fillRect(cx - W*0.16, cy - 22, W*0.32, 34)
+      g.lineStyle(1,0x1a2535,0.6); g.strokeRect(cx-W*0.16,cy-22,W*0.32,34)
+      // Draw inactive world peace text directly
+      if(!this.climateName.visible){
+        this.climateName.setVisible(true)
+        this.climateName.setPosition(cx, cy-8)
+        this.climateName.setText('⚖ WORLD STABLE')
+        this.climateName.setColor('#334455')
+        this.climateName.setFontSize('7px')
+        this.climateTicks.setVisible(true)
+        this.climateTicks.setPosition(cx, cy+10)
+        this.climateTicks.setText('No active calamity')
+        this.climateTicks.setColor('#223344')
+        this.climateIcon.setVisible(false)
+        this.climateDesc.setVisible(false)
+        this.climateSub.setVisible(false)
+      }
+      return
+    }
+
+    const info = this.CLIMATE_INFO[ct]; if(!info) return
+
+    // Animated glow panel background
+    const pulse = 0.5 + 0.5 * Math.sin(this.phase * 2.5)
+    const panW = W * 0.32, panH = H * 0.22
+    const px = cx - panW/2, py = cy - panH/2
+
+    // Outer glow
+    g.fillStyle(info.col, 0.06 + 0.04 * pulse); g.fillRect(px-8,py-8,panW+16,panH+16)
+    g.lineStyle(3, info.col, 0.3 + 0.3*pulse); g.strokeRect(px-8,py-8,panW+16,panH+16)
+
+    // Main panel — dark inventory-style box
+    g.fillStyle(0x080c14, 0.92); g.fillRect(px,py,panW,panH)
+    g.lineStyle(3, info.col, 0.8 + 0.2*pulse); g.strokeRect(px,py,panW,panH)
+    // Inner highlight top-left
+    g.lineStyle(2,0xffffff,0.06); g.lineBetween(px+1,py+1,px+panW-1,py+1)
+    g.lineBetween(px+1,py+1,px+1,py+panH-1)
+    // Separator line under name
+    g.lineStyle(1,info.col,0.35); g.lineBetween(px+10,py+30,px+panW-10,py+30)
+    // Tick progress bar
+    const maxTicks = 30  // assumption for display
+    const remaining = clamp(this.climate.duration_remaining/maxTicks,0,1)
+    const barY = py+panH-10, barX=px+10, barW=panW-20
+    g.fillStyle(0x1a1a1a,0.9); g.fillRect(barX,barY-5,barW,5)
+    g.fillStyle(info.col, 0.85); g.fillRect(barX,barY-5,barW*remaining,5)
+    g.lineStyle(1,info.col,0.4); g.strokeRect(barX,barY-5,barW,5)
+
+    // Update text objects
+    this.climateIcon.setVisible(true).setPosition(cx, py+8).setText(info.icon).setFontSize('22px')
+    this.climateName.setVisible(true).setPosition(cx, py+34).setText(info.name).setColor(info.colStr).setFontSize('9px')
+    this.climateDesc.setVisible(true).setPosition(cx, py+50).setText(info.desc).setFontSize('9px').setColor('#dddddd')
+    this.climateSub.setVisible(true).setPosition(cx, py+panH-52).setText(info.affects).setFontSize('8px').setColor(info.colStr)
+    this.climateTicks.setVisible(true).setPosition(cx, py+panH-26)
+      .setText(`${this.climate.duration_remaining} TICKS REMAINING`).setColor('#999999').setFontSize('8px')
+  }
+
   // ── Resize ─────────────────────────────────────────────────────────────────
 
   private _onResize(W:number, H:number){
@@ -652,9 +795,11 @@ export class IsoScene extends Phaser.Scene {
     ;[this.nameLine1,this.nameLine2,this.nameLine3,this.presLabels,
       this.crimeLabels,this.actionLabels,this.resIconLbls,this.resPctLbls
     ].forEach(m=>{ m.forEach(t=>t.destroy()); m.clear() })
+    ;[this.climateIcon,this.climateName,this.climateDesc,this.climateSub,this.climateTicks].forEach(t=>t?.destroy())
     this.particles=[]
     this._drawVoxelScene(W,H)
     this._createLabels(W,H)
+    this._createClimatePanel(W,H)
   }
 
   private _regionCenter(id:string,W:number,H:number){
