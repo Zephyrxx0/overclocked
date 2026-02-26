@@ -1,225 +1,199 @@
 """
-AI Agent classes for WorldSim simulation.
-Agents govern regions and make strategy decisions.
+WorldSim — AI Governor Agents with Q-Learning
+Each agent governs one or more regions, making resource allocation decisions.
 """
 
+from __future__ import annotations
+
 import random
+from collections import defaultdict
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Tuple
 
-from mesa import Agent
+import numpy as np
 
-from .resources import Resource, ResourceManager
+if TYPE_CHECKING:
+    from ..config import RLConfig
+    from .population import Population
+    from .resources import RegionResources
 
 
-class AgentStrategy(Enum):
-    """Possible strategies for AI agents."""
-
-    DEFENSIVE = "defensive"  # Focus on preservation and conservation
-    EXPANSIVE = "expansive"  # Focus on growth and acquisition
-    NEGOTIATOR = "negotiator"  # Focus on trade and diplomacy
-    EXTRACTIVE = "extractive"  # Focus on maximum resource extraction
+def _discretize(value: float, bins: int = 5) -> int:
+    """Discretize a 0-1 float into bins for Q-table indexing."""
+    return min(bins - 1, max(0, int(value * bins)))
 
 
 @dataclass
 class AgentDecision:
-    """Represents a decision made by an agent."""
-
+    """Record of a single decision made by an agent."""
+    tick: int
     action: str
-    target: str
-    resource: str
-    amount: float
-    confidence: float = 0.0
+    state: tuple
+    reward: float
 
 
-class AIAgent(Agent):
+class GovernorAgent:
     """
-    Autonomous AI Agent that governs a region.
-    Learns strategies through reinforcement learning.
+    RL-based governor that manages a region.
+    Uses Q-learning to learn resource allocation strategies.
     """
 
-    def __init__(
+    _next_id: int = 0
+
+    def __init__(self, agent_id: int, region_key: str, cfg: RLConfig):
+        self.agent_id = agent_id
+        self.region_key = region_key
+        self.cfg = cfg
+        self.name = f"Governor-{agent_id}"
+
+        # Q-table: state -> action -> Q-value
+        self.q_table: Dict[tuple, Dict[str, float]] = defaultdict(
+            lambda: {a: 0.0 for a in cfg.actions}
+        )
+        self.epsilon = cfg.epsilon
+
+        # Tracking
+        self.last_state: tuple | None = None
+        self.last_action: str | None = None
+        self.last_population: int = 0
+        self.last_health: float = 0.0
+        self.total_reward: float = 0.0
+        self.decision_history: List[AgentDecision] = []
+
+    def get_state(self, resources: RegionResources, population: Population) -> tuple:
+        """Discretize region state into a Q-table key."""
+        return (
+            _discretize(resources.food.pct / 100.0),
+            _discretize(resources.water.pct / 100.0),
+            _discretize(population.health),
+            _discretize(population.density),
+        )
+
+    def choose_action(self, state: tuple) -> str:
+        """Epsilon-greedy action selection."""
+        if random.random() < self.epsilon:
+            return random.choice(self.cfg.actions)
+
+        q_values = self.q_table[state]
+        max_q = max(q_values.values())
+        best = [a for a, q in q_values.items() if q == max_q]
+        return random.choice(best)
+
+    def compute_reward(self, population: Population) -> float:
+        """Reward = population growth + health improvement."""
+        pop_delta = population.count - self.last_population
+        health_delta = population.health - self.last_health
+        pop_reward = pop_delta / max(1, population.max_capacity) * 10.0
+        health_reward = health_delta * 5.0
+        alive_bonus = 1.0 if population.count > 0 else -10.0
+        return pop_reward + health_reward + alive_bonus
+
+    def update_q(self, state: tuple, action: str, reward: float, next_state: tuple) -> None:
+        """Q-learning update."""
+        old_q = self.q_table[state][action]
+        next_max = max(self.q_table[next_state].values())
+        new_q = old_q + self.cfg.learning_rate * (
+            reward + self.cfg.discount_factor * next_max - old_q
+        )
+        self.q_table[state][action] = new_q
+
+    def step(
         self,
-        unique_id: int,
-        model,
-        region_id: int,
-        name: str,
-        strategy: AgentStrategy = AgentStrategy.DEFENSIVE,
-    ):
-        super().__init__(unique_id, model)
-        self.region_id = region_id
-        self.name = name
-        self.strategy = strategy
+        resources: RegionResources,
+        population: Population,
+        tick: int,
+    ) -> str:
+        """
+        Execute one decision cycle:
+        1. Observe state
+        2. Compute reward from last action
+        3. Update Q-table
+        4. Choose and execute new action
+        """
+        state = self.get_state(resources, population)
 
-        # Learning state
-        self.rewards: Dict[str, float] = field(default_factory=dict)
-        self.strategy_scores: Dict[AgentStrategy, float] = field(default_factory=dict)
+        # Update Q-table with previous transition
+        if self.last_state is not None and self.last_action is not None:
+            reward = self.compute_reward(population)
+            self.update_q(self.last_state, self.last_action, reward, state)
+            self.total_reward += reward
 
-        # Action history
-        self.history: List[AgentDecision] = []
+            self.decision_history.append(AgentDecision(
+                tick=tick, action=self.last_action,
+                state=self.last_state, reward=reward,
+            ))
+            if len(self.decision_history) > 200:
+                self.decision_history = self.decision_history[-100:]
 
-        # Initialize strategy scores
-        for strategy in AgentStrategy:
-            self.strategy_scores[strategy] = 100.0
+        # Choose action
+        action = self.choose_action(state)
 
-        # Create resource manager for this agent's region
-        self.resources = ResourceManager()
+        # Execute action effects on resources
+        self._execute_action(action, resources, population)
 
-    def step(self):
-        """Execute one tick of the simulation."""
-        # 1. Assess current state
-        assessment = self.assess_state()
+        # Save state for next tick
+        self.last_state = state
+        self.last_action = action
+        self.last_population = population.count
+        self.last_health = population.health
 
-        # 2. Choose action based on strategy and state
-        decision = self.make_decision(assessment)
+        # Decay epsilon
+        self.epsilon = max(self.cfg.epsilon_min, self.epsilon * self.cfg.epsilon_decay)
 
-        # 3. Execute decision
-        self.execute_decision(decision)
+        return action
 
-        # 4. Update history
-        self.history.append(decision)
+    def _execute_action(
+        self, action: str, resources: RegionResources, population: Population
+    ) -> None:
+        """Apply action effects to region resources."""
+        if action == "focus_food":
+            resources.food.regen_multiplier *= 1.3
+            resources.water.regen_multiplier *= 0.9
 
-        # 5. Regenerate resources
-        self.resources.regenerate_all()
+        elif action == "focus_water":
+            resources.water.regen_multiplier *= 1.3
+            resources.food.regen_multiplier *= 0.9
 
-    def assess_state(self) -> Dict:
-        """Assess current simulation state."""
-        resources = self.resources.get_all()
+        elif action == "balance_resources":
+            resources.food.regen_multiplier = (resources.food.regen_multiplier + 1.0) / 2
+            resources.water.regen_multiplier = (resources.water.regen_multiplier + 1.0) / 2
 
+        elif action == "stockpile":
+            resources.food.value += resources.food.effective_regen * 0.3
+            resources.water.value += resources.water.effective_regen * 0.3
+            population.health -= 0.005
+
+        elif action == "trade":
+            if resources.food.pct > resources.water.pct:
+                transfer = resources.food.value * 0.05
+                resources.food.consume(transfer)
+                resources.water.apply_event(transfer * 0.7)
+            else:
+                transfer = resources.water.value * 0.05
+                resources.water.consume(transfer)
+                resources.food.apply_event(transfer * 0.7)
+
+        elif action == "migrate_out":
+            pass  # Migration handled by world step
+
+    @property
+    def current_strategy(self) -> str:
+        """Most frequently chosen action in recent history."""
+        if not self.decision_history:
+            return "exploring"
+        recent = self.decision_history[-20:]
+        counts: Dict[str, int] = {}
+        for d in recent:
+            counts[d.action] = counts.get(d.action, 0) + 1
+        return max(counts, key=counts.get)  # type: ignore
+
+    def to_dict(self) -> dict:
         return {
-            "total_resources": self.resources.total_resources(),
-            "resource_breakdown": resources,
-            "critical_resources": [
-                name for name, r in resources.items() if r["current"] < r["max"] * 0.2
-            ],
-            "tick": self.model.current_tick,
-        }
-
-    def make_decision(self, assessment: Dict) -> AgentDecision:
-        """Make a decision based on assessment and strategy."""
-
-        # Get critical resources that need attention
-        critical = assessment["critical_resources"]
-
-        if self.strategy == AgentStrategy.DEFENSIVE:
-            if critical:
-                return AgentDecision(
-                    action="conserve",
-                    target=f"region_{self.region_id}",
-                    resource=critical[0],
-                    amount=self.resources.get(critical[0]).current_value * 0.1,
-                    confidence=0.8,
-                )
-            return AgentDecision(
-                action="maintain",
-                target=f"region_{self.region_id}",
-                resource="energy",
-                amount=10.0,
-                confidence=0.7,
-            )
-
-        elif self.strategy == AgentStrategy.EXPANSIVE:
-            return AgentDecision(
-                action="develop",
-                target=f"region_{self.region_id}",
-                resource="land",
-                amount=1.0,
-                confidence=0.6,
-            )
-
-        elif self.strategy == AgentStrategy.NEGOTIATOR:
-            return AgentDecision(
-                action="trade",
-                target="network",
-                resource=random.choice(list(self.resources.resources.keys())),
-                amount=20.0,
-                confidence=0.5,
-            )
-
-        elif self.strategy == AgentStrategy.EXTRACTIVE:
-            return AgentDecision(
-                action="extract",
-                target=f"region_{self.region_id}",
-                resource=random.choice(["water", "food", "energy"]),
-                amount=50.0,
-                confidence=0.7,
-            )
-
-        # Default decision
-        return AgentDecision(
-            action="idle",
-            target=f"region_{self.region_id}",
-            resource="water",
-            amount=0.0,
-            confidence=0.0,
-        )
-
-    def execute_decision(self, decision: AgentDecision):
-        """Execute a decision."""
-        if decision.action == "conserve":
-            resource = self.resources.get(decision.resource)
-            resource.consume(decision.amount * 0.5)  # Reduced consumption
-
-        elif decision.action == "extract":
-            resource = self.resources.get(decision.resource)
-            resource.consume(decision.amount)
-
-        elif decision.action == "develop":
-            resource = self.resources.get("land")
-            resource.consume(decision.amount)
-            # Land development improves future regeneration
-            for r in self.resources.resources.values():
-                r.regeneration_rate += 0.1
-
-        elif decision.action == "trade":
-            # Trade affects resources indirectly
-            resource = self.resources.get(decision.resource)
-            resource.apply_event(decision.amount * 0.3)
-
-        # Update strategy score based on action type
-        self.strategy_scores[self.strategy] += 0.5
-
-    def receive_reward(self, reward: float, resource_name: str):
-        """Receive reward for resource changes."""
-        key = f"{self.region_id}_{resource_name}"
-        self.rewards[key] = self.rewards.get(key, 0.0) + reward
-
-    def adjust_strategy(self):
-        """Adjust strategy based on performance."""
-        best_strategy = max(
-            self.strategy_scores.keys(), key=lambda s: self.strategy_scores[s]
-        )
-        if best_strategy != self.strategy:
-            self.strategy = best_strategy
-
-    def to_dict(self) -> Dict:
-        """Return agent state as dictionary."""
-        return {
-            "id": self.unique_id,
+            "agent_id": self.agent_id,
             "name": self.name,
-            "region_id": self.region_id,
-            "strategy": self.strategy.value,
-            "resources": self.resources.get_all(),
-            "history_length": len(self.history),
-            "strategy_scores": {k.value: v for k, v in self.strategy_scores.items()},
+            "region_key": self.region_key,
+            "strategy": self.current_strategy,
+            "epsilon": round(self.epsilon, 4),
+            "total_reward": round(self.total_reward, 2),
+            "decisions": len(self.decision_history),
         }
-
-
-class AgentFactory:
-    """Factory for creating AI agents."""
-
-    strategy_names = {
-        AgentStrategy.DEFENSIVE: "Guardian",
-        AgentStrategy.EXPANSIVE: "Pioneer",
-        AgentStrategy.NEGOTIATOR: "Diplomat",
-        AgentStrategy.EXTRACTIVE: "Industrialist",
-    }
-
-    @classmethod
-    def create_agent(
-        cls, unique_id: int, model, region_id: int, strategy: AgentStrategy
-    ) -> AIAgent:
-        """Create an AI agent with given strategy."""
-        name = f"{cls.strategy_names[strategy]}-{region_id}"
-        return AIAgent(unique_id, model, region_id, name, strategy)

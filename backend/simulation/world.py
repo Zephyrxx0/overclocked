@@ -1,222 +1,351 @@
 """
-World and Region classes for WorldSim simulation.
-Defines the grid-based world structure.
+WorldSim — World Model
+Mesa-based simulation orchestrator: terrain, agents, population, climate, tick loop.
 """
 
+from __future__ import annotations
+
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from mesa import AgentBasedModel, Grid
-from mesa.time import RandomActivation
+import numpy as np
 
-from .agents import AIAgent, AgentFactory, AgentStrategy
-from .resources import ResourceManager
+from ..config import SimConfig, TERRAIN_TYPES
+from .agents import GovernorAgent
+from .climate import ClimateSystem
+from .population import Population
+from .resources import RegionResources
+from .terrain import generate_terrain, get_terrain_modifiers
 
 
 @dataclass
-class ClimateEvent:
-    """Represents a climate event affecting the world."""
-
-    name: str
-    severity: float  # 0.0 to 1.0
-    affected_resources: List[str]
-    duration: int  # ticks
-
-
 class Region:
-    """Represents a single region in the world grid."""
+    """A single grid cell with terrain, resources, population, and optional governor."""
+    x: int
+    y: int
+    terrain: str
+    climate_zone: str
+    resources: RegionResources
+    population: Population
+    governor: Optional[GovernorAgent] = None
 
-    def __init__(
-        self,
-        x: int,
-        y: int,
-        resource_config: Optional[Dict] = None,
-    ):
-        self.x = x
-        self.y = y
-        self.pos = (x, y)
-        self.resource_manager = ResourceManager(resource_config)
-        self.agent: Optional[AIAgent] = None
-        self.climate_events: List[ClimateEvent] = []
+    @property
+    def key(self) -> str:
+        return f"{self.x}-{self.y}"
 
-    def step(self):
-        """Execute one tick for this region."""
-        # Handle climate events
-        self._process_climate_events()
-
-        # Regenerate resources
-        self.resource_manager.regenerate_all()
-
-    def _process_climate_events(self):
-        """Process active climate events."""
-        active_events = []
-        for event in self.climate_events:
-            for resource_name in event.affected_resources:
-                change = -(
-                    event.severity * 100 * (1 - event.duration / 10)
-                )  # Decreasing effect
-                self.resource_manager.apply_event(resource_name, change)
-            event.duration -= 1
-            if event.duration > 0:
-                active_events.append(event)
-        self.climate_events = active_events
-
-    def add_climate_event(self, event: ClimateEvent):
-        """Add a climate event to this region."""
-        self.climate_events.append(event)
-
-    def to_dict(self) -> Dict:
-        """Return region state as dictionary."""
+    def to_dict(self) -> dict:
         return {
             "x": self.x,
             "y": self.y,
-            "resources": self.resource_manager.get_all(),
-            "has_agent": self.agent is not None,
-            "agent_strategy": self.agent.strategy.value if self.agent else None,
-            "climate_events": [e.name for e in self.climate_events],
+            "terrain": self.terrain,
+            "climate_zone": self.climate_zone,
+            "resources": self.resources.to_dict(),
+            "population": self.population.to_dict(),
+            "governor": self.governor.to_dict() if self.governor else None,
         }
 
 
-class WorldModel(AgentBasedModel):
+class WorldModel:
     """
-    Main simulation model - grid-based world with regions and agents.
+    The main simulation model.
+    Manages a grid of regions with resources, populations, governors, and climate.
     """
 
-    def __init__(
-        self,
-        width: int = 5,
-        height: int = 5,
-        num_agents: int = 5,
-        region_resources: Optional[Dict] = None,
-    ):
-        self.width = width
-        self.height = height
-        self.num_agents = min(num_agents, width * height)
+    def __init__(self, cfg: SimConfig | None = None):
+        self.cfg = cfg or SimConfig()
+        self.width = self.cfg.grid.width
+        self.height = self.cfg.grid.height
+        self.current_tick: int = 0
+        self.running: bool = False
+        self.ended: bool = False
 
-        # Simulation state
-        self.current_tick = 0
-        self.running = True
-        self.start_tick = 0
+        self.regions: Dict[str, Region] = {}
+        self.agents: List[GovernorAgent] = []
+        self.climate: ClimateSystem = ClimateSystem(self.cfg.climate)
 
-        # Mesa components
-        self.grid = Grid(width, height, torus=False)
-        self.scheduler = RandomActivation(self)
+        self._build_world()
 
-        # World components
-        self.regions: Dict[Tuple[int, int], Region] = {}
-        self.agents: List[AIAgent] = []
+    def _build_world(self) -> None:
+        """Generate terrain, create regions, place agents."""
+        terrain_grid, climate_grid = generate_terrain(
+            self.cfg.grid, self.cfg.climate
+        )
 
-        # Configuration
-        self.resource_config = region_resources
-        self.climate_event_rate = 0.1  # 10% chance per tick per region
-
-        # Initialize world
-        self._initialize_world()
-
-    def _initialize_world(self):
-        """Initialize the world grid and agents."""
         # Create regions
-        for x in range(self.width):
-            for y in range(self.height):
-                region = Region(x, y, self.resource_config)
-                self.regions[(x, y)] = region
+        for y in range(self.height):
+            for x in range(self.width):
+                terrain_type = terrain_grid[y, x]
+                climate_zone = climate_grid[y, x]
+                mods = get_terrain_modifiers(terrain_type)
 
-        # Create and place agents
-        strategies = list(AgentStrategy)
-        for i in range(self.num_agents):
-            # Get random position
-            x = i % self.width
-            y = i // self.width
-
-            if (x, y) in self.regions:
-                # Create agent with random strategy
-                strategy = random.choice(strategies)
-                agent = AgentFactory.create_agent(
-                    unique_id=i,
-                    model=self,
-                    region_id=i,
-                    strategy=strategy,
+                resources = RegionResources(
+                    food_max=self.cfg.resources.food_max,
+                    food_regen=self.cfg.resources.food_regen,
+                    water_max=self.cfg.resources.water_max,
+                    water_regen=self.cfg.resources.water_regen,
+                    food_mult=mods["food_mult"],
+                    water_mult=mods["water_mult"],
                 )
 
-                self.regions[(x, y)].agent = agent
-                self.scheduler.add(agent)
-                self.agents.append(agent)
+                pop_capacity = int(
+                    self.cfg.population.max_per_region * mods["capacity_mult"]
+                )
+                initial_pop = min(
+                    self.cfg.population.initial_per_region,
+                    pop_capacity,
+                )
 
-    def load_config(self):
-        """Load configuration from file or defaults."""
-        pass  # Placeholder for config loading
+                population = Population(
+                    count=initial_pop,
+                    health=1.0,
+                    max_capacity=pop_capacity,
+                )
 
-    def step(self):
-        """Execute one tick of the simulation."""
-        # 1. Schedule and run all agents
-        self.scheduler.step()
+                region = Region(
+                    x=x, y=y,
+                    terrain=terrain_type,
+                    climate_zone=climate_zone,
+                    resources=resources,
+                    population=population,
+                )
+                self.regions[region.key] = region
 
-        # 2. Update regions (climate events, regeneration)
-        for region in self.regions.values():
-            region.step()
+        # Place governor agents on random regions
+        region_keys = list(self.regions.keys())
+        num_agents = min(self.cfg.num_agents, len(region_keys))
+        chosen = random.sample(region_keys, num_agents)
 
-        # 3. Check for climate events
-        self._check_climate_events()
+        for i, rk in enumerate(chosen):
+            agent = GovernorAgent(
+                agent_id=i,
+                region_key=rk,
+                cfg=self.cfg.rl,
+            )
+            self.agents.append(agent)
+            self.regions[rk].governor = agent
 
-        # 4. Update tick counter
-        self.current_tick += 1
-
-        # 5. Check for end conditions
-        if self._should_end():
-            self.running = False
-
-    def _check_climate_events(self):
-        """Check for and create climate events."""
-        if random.random() > self.climate_event_rate:
+    def step(self) -> None:
+        """Execute one simulation tick."""
+        if not self.running or self.ended:
             return
 
-        # Create a climate event
-        event = ClimateEvent(
-            name=random.choice(["drought", "flood", "heatwave", "frost", "storm"]),
-            severity=random.uniform(0.3, 0.8),
-            affected_resources=random.sample(
-                ["water", "food", "energy", "land"], k=random.randint(1, 3)
-            ),
-            duration=random.randint(5, 15),
+        self.current_tick += 1
+
+        # 1. Agent decisions
+        for agent in self.agents:
+            region = self.regions.get(agent.region_key)
+            if region and region.population.is_alive:
+                agent.step(region.resources, region.population, self.current_tick)
+
+        # 2. Population tick for every region
+        for region in self.regions.values():
+            if not region.population.is_alive:
+                continue
+
+            # Compute food/water needs: 1 unit per person per tick
+            pop = region.population.count
+            food_needed = pop * 1.0
+            water_needed = pop * 1.0
+
+            food_consumed, water_consumed = region.population.tick(
+                food_available=region.resources.food.value,
+                water_available=region.resources.water.value,
+                food_needed=food_needed,
+                water_needed=water_needed,
+                cfg=self.cfg.population,
+            )
+
+            # Deduct consumed resources
+            region.resources.consume_food(food_consumed)
+            region.resources.consume_water(water_consumed)
+
+        # 3. Climate events
+        for region in self.regions.values():
+            # Maybe spawn new event
+            self.climate.maybe_spawn_event(region.key, region.climate_zone)
+
+            # Process active events
+            effects = self.climate.tick_region(region.key)
+            if "food" in effects:
+                delta = effects["food"] * region.resources.food.max_value * 0.1
+                region.resources.food.apply_event(delta)
+            if "water" in effects:
+                delta = effects["water"] * region.resources.water.max_value * 0.1
+                region.resources.water.apply_event(delta)
+
+        # 4. Resource regeneration
+        for region in self.regions.values():
+            region.resources.regenerate_all()
+
+        # 5. Migration: agents requesting migrate_out move pop to best neighbor
+        self._process_migration()
+
+        # 6. Check end condition
+        dead_regions = sum(
+            1 for r in self.regions.values() if not r.population.is_alive
         )
+        total = len(self.regions)
+        if total > 0 and dead_regions / total >= self.cfg.collapse_threshold:
+            self.ended = True
+            self.running = False
 
-        # Apply to random regions
-        num_affected = random.randint(1, max(1, self.width * self.height // 3))
-        positions = list(self.regions.keys())
-        random.shuffle(positions)
+    def _process_migration(self) -> None:
+        """Handle population migration between regions."""
+        cfg = self.cfg.population
 
-        for i in range(num_affected):
-            if i < len(positions):
-                self.regions[positions[i]].add_climate_event(event)
+        for region in self.regions.values():
+            if not region.population.is_alive:
+                continue
 
-    def _should_end(self) -> bool:
-        """Check if simulation should end."""
-        # End if all regions are collapsed
-        collapsed = sum(
-            1 for r in self.regions.values() if r.resource_manager.total_resources()
-            < 10
-        )
-        return collapsed >= len(self.regions) * 0.8
+            should_migrate = False
 
-    def get_state(self) -> Dict:
-        """Get full simulation state."""
+            # Governor-requested migration
+            if region.governor and region.governor.last_action == "migrate_out":
+                should_migrate = True
+
+            # Health-triggered migration
+            if region.population.health < cfg.migration_threshold:
+                should_migrate = True
+
+            if not should_migrate:
+                region.population.migrants_out = 0
+                continue
+
+            # Find best neighbor
+            neighbors = self._get_neighbors(region.x, region.y)
+            if not neighbors:
+                continue
+
+            # Pick neighbor with highest food+water per capita
+            best = max(
+                neighbors,
+                key=lambda n: (
+                    (n.resources.total_value / max(1, n.population.count))
+                    if n.population.count < n.population.max_capacity
+                    else 0
+                ),
+            )
+
+            if best.population.count >= best.population.max_capacity:
+                continue
+
+            migrants = region.population.emigrate(
+                int(region.population.count * cfg.migration_rate)
+            )
+            best.population.immigrate(migrants)
+
+    def _get_neighbors(self, x: int, y: int) -> List[Region]:
+        """Get adjacent regions (4-directional)."""
+        neighbors = []
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = x + dx, y + dy
+            key = f"{nx}-{ny}"
+            if key in self.regions:
+                neighbors.append(self.regions[key])
+        return neighbors
+
+    def start(self) -> None:
+        self.running = True
+
+    def pause(self) -> None:
+        self.running = False
+
+    def reset(self) -> None:
+        """Fully reinitialize the world."""
+        self.current_tick = 0
+        self.running = False
+        self.ended = False
+        self.regions.clear()
+        self.agents.clear()
+        self.climate.reset()
+        self._build_world()
+
+    def get_state(self) -> dict:
+        """Full serialized world state for WebSocket broadcast."""
         return {
             "tick": self.current_tick,
             "running": self.running,
+            "ended": self.ended,
             "width": self.width,
             "height": self.height,
             "num_agents": len(self.agents),
+            "total_population": sum(
+                r.population.count for r in self.regions.values()
+            ),
             "regions": {
-                f"{pos[0]}-{pos[1]}": region.to_dict()
-                for pos, region in self.regions.items()
+                key: region.to_dict()
+                for key, region in self.regions.items()
             },
-            "agents": [agent.to_dict() for agent in self.agents],
+            "agents": [a.to_dict() for a in self.agents],
+            "climate_events": {
+                key: self.climate.get_region_events(key)
+                for key in self.regions
+                if self.climate.get_region_events(key)
+            },
         }
 
-    def run(self, num_steps: int = 100):
-        """Run the simulation for a number of steps."""
-        for _ in range(num_steps):
-            if not self.running:
-                break
-            self.step()
+    def get_compact_state(self) -> dict:
+        """
+        Compact state for efficient WebSocket broadcast.
+        Regions as flat arrays instead of nested objects (~5x smaller).
+        """
+        # Pack region data into parallel arrays for minimal JSON size
+        keys = []
+        terrains = []
+        food_pcts = []
+        water_pcts = []
+        pops = []
+        healths = []
+
+        for key, region in self.regions.items():
+            keys.append(key)
+            terrains.append(region.terrain[0])  # first char: m/h/p/d/s/r/l
+            food_pcts.append(round(region.resources.food.pct, 1))
+            water_pcts.append(round(region.resources.water.pct, 1))
+            pops.append(region.population.count)
+            healths.append(round(region.population.health, 2))
+
+        return {
+            "tick": self.current_tick,
+            "running": self.running,
+            "ended": self.ended,
+            "width": self.width,
+            "height": self.height,
+            "total_population": sum(pops),
+            "r_keys": keys,
+            "r_terrain": terrains,
+            "r_food": food_pcts,
+            "r_water": water_pcts,
+            "r_pop": pops,
+            "r_health": healths,
+            "agents": [a.to_dict() for a in self.agents],
+            "climate_events": {
+                key: self.climate.get_region_events(key)
+                for key in self.regions
+                if self.climate.get_region_events(key)
+            },
+        }
+
+    def get_summary(self) -> dict:
+        """Lightweight status for polling."""
+        alive = sum(1 for r in self.regions.values() if r.population.is_alive)
+        total_pop = sum(r.population.count for r in self.regions.values())
+        return {
+            "tick": self.current_tick,
+            "running": self.running,
+            "ended": self.ended,
+            "width": self.width,
+            "height": self.height,
+            "num_agents": len(self.agents),
+            "total_population": total_pop,
+            "alive_regions": alive,
+            "total_regions": len(self.regions),
+        }
+
+    # Backward-compat stubs used by old main.py during transition
+    def load_config(self) -> None:
+        pass
+
+    def run(self) -> None:
+        self.start()

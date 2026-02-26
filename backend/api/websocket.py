@@ -1,133 +1,136 @@
 """
-WebSocket handler for WorldSim simulation.
-Handles real-time client connections and state broadcasts.
+WorldSim — WebSocket Handler
+Native FastAPI WebSocket with state broadcasting and control.
 """
+
+from __future__ import annotations
 
 import asyncio
 import json
-import logging
-from typing import Dict, List, Set
+from typing import TYPE_CHECKING, Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from ..simulation.world import WorldModel
+if TYPE_CHECKING:
+    from ..simulation.world import WorldModel
 
-router = APIRouter(prefix="/ws", tags=["websocket"])
-logger = logging.getLogger(__name__)
+router = APIRouter()
 
-# Global state
-subscriptions: Set[WebSocket] = set()
-world_model: WorldModel | None = None
-broadcast_task = None
-
-
-def set_world_model(model: WorldModel):
-    """Set the global simulation model."""
-    global world_model
-    world_model = model
+_world: WorldModel | None = None
+_subscribers: Set[WebSocket] = set()
+_broadcast_task: asyncio.Task | None = None
+_tick_interval: float = 1.0
 
 
-async def broadcast_state():
-    """Broadcast simulation state to all connected clients."""
-    if world_model is None:
+def set_world_model(model: WorldModel) -> None:
+    global _world
+    _world = model
+
+
+def set_tick_interval(interval: float) -> None:
+    global _tick_interval
+    _tick_interval = interval
+
+
+def start_broadcast() -> None:
+    global _broadcast_task
+    if _broadcast_task is None or _broadcast_task.done():
+        _broadcast_task = asyncio.create_task(_broadcast_loop())
+
+
+def stop_broadcast() -> None:
+    global _broadcast_task
+    if _broadcast_task and not _broadcast_task.done():
+        _broadcast_task.cancel()
+        _broadcast_task = None
+
+
+async def _broadcast_loop() -> None:
+    """Main loop: step simulation + broadcast state to all subscribers."""
+    while True:
+        try:
+            await asyncio.sleep(_tick_interval)
+
+            if _world is None:
+                continue
+
+            # Step simulation if running
+            if _world.running:
+                _world.step()
+
+            if not _subscribers:
+                continue
+
+            # Broadcast compact state for efficiency
+            state = _world.get_compact_state()
+            message = json.dumps({"type": "state_update", "data": state})
+
+            dead: Set[WebSocket] = set()
+            for ws in _subscribers:
+                try:
+                    await ws.send_text(message)
+                except Exception:
+                    dead.add(ws)
+
+            _subscribers -= dead
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"Broadcast error: {e}")
+            await asyncio.sleep(1)
+
+
+async def _handle_client_message(ws: WebSocket, raw: str) -> None:
+    """Handle incoming client messages."""
+    try:
+        msg = json.loads(raw)
+    except json.JSONDecodeError:
+        await ws.send_text(json.dumps({"type": "error", "message": "Invalid JSON"}))
         return
 
-    state = world_model.get_state()
-    message = json.dumps({"type": "state_update", "data": state})
+    msg_type = msg.get("type", "")
 
-    disconnected = set()
-    for client in subscriptions:
-        try:
-            await client.send_text(message)
-        except Exception as e:
-            logger.error(f"Error sending to client: {e}")
-            disconnected.add(client)
+    if msg_type == "request_state" and _world:
+        state = _world.get_state()
+        await ws.send_text(json.dumps({"type": "state_update", "data": state}))
 
-    # Remove disconnected clients
-    for client in disconnected:
-        subscriptions.discard(client)
+    elif msg_type == "control" and _world:
+        action = msg.get("action", "")
+        if action == "start":
+            _world.start()
+        elif action == "pause":
+            _world.pause()
+        elif action == "reset":
+            _world.reset()
+        else:
+            await ws.send_text(json.dumps({"type": "error", "message": f"Unknown action: {action}"}))
+            return
+        await ws.send_text(json.dumps({"type": "control_ack", "action": action}))
+
+    else:
+        await ws.send_text(json.dumps({"type": "error", "message": f"Unknown message type: {msg_type}"}))
 
 
-async def broadcast_tick_loop(interval: float = 1.0):
-    """Background task to broadcast tick updates."""
-    while True:
-        await asyncio.sleep(interval)
-        if subscriptions and world_model:
-            await broadcast_state()
-
-
-@router.websocket("/subscribe")
-async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for client subscriptions."""
-    await websocket.accept()
-    subscriptions.add(websocket)
-    logger.info(f"Client connected. Total subscribers: {len(subscriptions)}")
+@router.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    await ws.accept()
+    _subscribers.add(ws)
 
     try:
         # Send initial state
-        if world_model:
-            initial_state = world_model.get_state()
-            await websocket.send_text(
-                json.dumps({"type": "initial_state", "data": initial_state})
-            )
+        if _world:
+            state = _world.get_state()
+            await ws.send_text(json.dumps({"type": "initial_state", "data": state}))
 
-        # Handle incoming messages
+        # Listen for client messages
         while True:
-            data = await websocket.receive_text()
-
-            try:
-                message = json.loads(data)
-                await handle_client_message(websocket, message)
-            except json.JSONDecodeError:
-                await websocket.send_text(
-                    json.dumps({"type": "error", "message": "Invalid JSON"})
-                )
+            raw = await ws.receive_text()
+            await _handle_client_message(ws, raw)
 
     except WebSocketDisconnect:
-        subscriptions.discard(websocket)
-        logger.info(f"Client disconnected. Total subscribers: {len(subscriptions)}")
-
-
-async def handle_client_message(websocket: WebSocket, message: Dict):
-    """Handle a message from a client."""
-    msg_type = message.get("type", "")
-
-    if msg_type == "request_state":
-        if world_model:
-            state = world_model.get_state()
-            await websocket.send_text(
-                json.dumps({"type": "state_update", "data": state})
-            )
-
-    elif msg_type == "control":
-        action = message.get("action", "")
-        if action == "start" and world_model:
-            world_model.running = True
-        elif action == "pause" and world_model:
-            world_model.running = False
-        elif action == "reset" and world_model:
-            world_model.__init__(
-                width=world_model.width,
-                height=world_model.height,
-                num_agents=world_model.num_agents,
-            )
-
-    else:
-        await websocket.send_text(
-            json.dumps({"type": "error", "message": f"Unknown message type: {msg_type}"})
-        )
-
-
-def start_broadcast():
-    """Start the broadcast task."""
-    global broadcast_task
-    if broadcast_task is None:
-        broadcast_task = asyncio.create_task(broadcast_tick_loop())
-
-
-def stop_broadcast():
-    """Stop the broadcast task."""
-    global broadcast_task
-    if broadcast_task:
-        broadcast_task.cancel()
-        broadcast_task = None
+        pass
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        _subscribers.discard(ws)

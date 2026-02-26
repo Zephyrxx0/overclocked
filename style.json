@@ -1,0 +1,33 @@
+{
+    "world" : [
+        "mountains",
+        "hilly",
+        "plains",
+        "desert",
+        "swamp",
+        "river",
+        "lake"
+    ],
+
+    "climate" : [
+        "tropical",
+        "arid",
+        "temperate",
+        "continental",
+        "polar"
+    ],
+
+    "civilization" : [
+        "town",
+        "city",
+        "village",
+        "farms"
+    ] , 
+
+    "artsyle" : [
+        "pixel art",
+        "isometric",
+        "top-down",
+        "side-scrolling"
+    ]
+}

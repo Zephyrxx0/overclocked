@@ -1,131 +1,107 @@
 """
-Resource management for WorldSim simulation.
-Defines resource types and their behavior.
+WorldSim — Resource System
+Food, Water with terrain-modified regeneration.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, Optional
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict
 
 
 @dataclass
 class Resource:
-    """Represents a single resource type with value and regeneration."""
-
-    name: str
-    initial_value: float
+    """Single resource with value, max, and terrain-modified regen."""
+    value: float
     max_value: float
-    depletion_rate: float = 0.0  # Amount consumed per tick
-    regeneration_rate: float = 0.0  # Amount regenerated per tick
-    current_value: float = field(init=False)
+    base_regen: float
+    regen_multiplier: float = 1.0
 
-    def __post_init__(self):
-        self.current_value = self.initial_value
-
-    def consume(self, amount: float = 0.0) -> float:
-        """Consume resource. Returns actual amount consumed."""
-        actual_consumed = min(amount, self.current_value)
-        self.current_value -= actual_consumed
-        return actual_consumed
-
-    def regenerate(self) -> float:
-        """Regenerate resource. Returns actual amount regenerated."""
-        actual_regenerated = min(
-            self.regeneration_rate, self.max_value - self.current_value
-        )
-        self.current_value += actual_regenerated
-        return actual_regenerated
-
-    def apply_event(self, change: float) -> float:
-        """Apply a change to the resource (positive or negative)."""
-        self.current_value = max(0.0, min(self.max_value, self.current_value + change))
-        return self.current_value
-
-    def to_dict(self) -> Dict:
-        """Return resource state as dictionary."""
-        return {
-            "name": self.name,
-            "current": self.current_value,
-            "initial": self.initial_value,
-            "max": self.max_value,
-            "depletion_rate": self.depletion_rate,
-            "regeneration_rate": self.regeneration_rate,
-        }
+    @property
+    def pct(self) -> float:
+        return (self.value / self.max_value * 100.0) if self.max_value > 0 else 0.0
 
     @property
     def is_critical(self) -> bool:
-        """Check if resource is at critical level (< 20%)."""
-        return self.current_value < (self.max_value * 0.2)
+        return self.pct < 20.0
 
     @property
     def is_empty(self) -> bool:
-        """Check if resource is depleted."""
-        return self.current_value <= 0
+        return self.value <= 0.0
 
+    @property
+    def effective_regen(self) -> float:
+        return self.base_regen * self.regen_multiplier
 
-class ResourceManager:
-    """Manages multiple resource types for a region or agent."""
+    def consume(self, amount: float) -> float:
+        """Consume resource. Returns actual amount consumed."""
+        actual = min(amount, self.value)
+        self.value = max(0.0, self.value - amount)
+        return actual
 
-    def __init__(self, resources_config: Optional[Dict] = None):
-        self.resources: Dict[str, Resource] = {}
+    def regenerate(self) -> float:
+        """Regenerate resource up to max. Returns amount regenerated."""
+        if self.value >= self.max_value:
+            return 0.0
+        regen = min(self.effective_regen, self.max_value - self.value)
+        self.value += regen
+        return regen
 
-        default_config = {
-            "water": {
-                "initial": 1000,
-                "max": 1000,
-                "regeneration_rate": 5.0,
-            },
-            "food": {
-                "initial": 1000,
-                "max": 1000,
-                "regeneration_rate": 5.0,
-            },
-            "energy": {
-                "initial": 1000,
-                "max": 1000,
-                "regeneration_rate": 5.0,
-            },
-            "land": {
-                "initial": 100,
-                "max": 100,
-                "regeneration_rate": 0.1,
-            },
+    def apply_event(self, change: float) -> None:
+        """Apply a climate event change (positive or negative)."""
+        self.value = max(0.0, min(self.max_value, self.value + change))
+
+    def to_dict(self) -> dict:
+        return {
+            "value": round(self.value, 2),
+            "max_value": self.max_value,
+            "pct": round(self.pct, 2),
+            "is_critical": self.is_critical,
         }
 
-        config = resources_config or default_config
 
-        for name, settings in config.items():
-            self.resources[name] = Resource(
-                name=name,
-                initial_value=settings.get("initial", 1000),
-                max_value=settings.get("max", 1000),
-                regeneration_rate=settings.get("regeneration_rate", 0.0),
-            )
+class RegionResources:
+    """Manages food and water for a single region."""
 
-    def get(self, name: str) -> Resource:
-        """Get a specific resource."""
-        return self.resources[name]
+    def __init__(
+        self,
+        food_max: float,
+        food_regen: float,
+        water_max: float,
+        water_regen: float,
+        food_mult: float = 1.0,
+        water_mult: float = 1.0,
+    ):
+        self.food = Resource(
+            value=food_max * food_mult,
+            max_value=food_max,
+            base_regen=food_regen,
+            regen_multiplier=food_mult,
+        )
+        self.water = Resource(
+            value=water_max * water_mult,
+            max_value=water_max,
+            base_regen=water_regen,
+            regen_multiplier=water_mult,
+        )
 
-    def consume(self, name: str, amount: float) -> float:
-        """Consume a specific resource."""
-        return self.resources[name].consume(amount)
+    def regenerate_all(self) -> None:
+        self.food.regenerate()
+        self.water.regenerate()
 
-    def regenerate_all(self):
-        """Regenerate all resources."""
-        for resource in self.resources.values():
-            resource.regenerate()
+    def consume_food(self, amount: float) -> float:
+        return self.food.consume(amount)
 
-    def apply_event(self, name: str, change: float):
-        """Apply an event change to a resource."""
-        self.resources[name].apply_event(change)
+    def consume_water(self, amount: float) -> float:
+        return self.water.consume(amount)
 
-    def get_all(self) -> Dict:
-        """Get all resources as dictionary."""
-        return {name: resource.to_dict() for name, resource in self.resources.items()}
+    @property
+    def total_value(self) -> float:
+        return self.food.value + self.water.value
 
-    def to_dict(self) -> Dict:
-        """Return all resource states."""
-        return self.get_all()
+    @property
+    def has_critical(self) -> bool:
+        return self.food.is_critical or self.water.is_critical
 
-    def total_resources(self) -> float:
-        """Get sum of all resource values."""
-        return sum(r.current_value for r in self.resources.values())
+    def to_dict(self) -> Dict[str, dict]:
+        return {"food": self.food.to_dict(), "water": self.water.to_dict()}

@@ -1,1 +1,1 @@
-# Simulation package
+"""WorldSim simulation engine."""

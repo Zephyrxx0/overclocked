@@ -1,105 +1,66 @@
 """
-WorldSim - Adaptive Resource Scarcity & Agent Strategy Simulator
-FastAPI Backend Application
+WorldSim — FastAPI Application Entry Point
 """
 
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import routes
-from .api import websocket as ws_module
+from .api import routes, websocket as ws_module
+from .config import SimConfig
 from .simulation.world import WorldModel
 
-
-# Global simulation instance
-world_model: WorldModel | None = None
+_world_model: WorldModel | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifespan - startup and shutdown."""
-    global world_model
+    global _world_model
 
-    # Startup: Initialize simulation
-    print("Initializing WorldSim simulation...")
-    world_model = WorldModel(width=5, height=5, num_agents=5)
-    world_model.load_config()
+    cfg = SimConfig()
+    print(f"Initializing WorldSim: {cfg.grid.width}x{cfg.grid.height} grid, {cfg.num_agents} agents")
+    _world_model = WorldModel(cfg)
 
-    # Set world model for routes and websocket
-    routes.set_world_model(world_model)
-    ws_module.set_world_model(world_model)
-
-    # Start broadcast task
+    routes.set_world_model(_world_model)
+    ws_module.set_world_model(_world_model)
+    ws_module.set_tick_interval(cfg.tick_interval)
     ws_module.start_broadcast()
 
-    print("WorldSim simulation initialized successfully")
+    print("WorldSim ready")
     yield
 
-    # Shutdown: Cleanup
     print("Shutting down WorldSim...")
     ws_module.stop_broadcast()
-    world_model = None
+    _world_model = None
 
 
 app = FastAPI(
     title="WorldSim API",
     description="Adaptive Resource Scarcity & Agent Strategy Simulator",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
-# CORS middleware for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "simulation_running": world_model is not None}
-
-
-@app.get("/api/v1/status")
-async def get_status():
-    """Get current simulation status."""
-    if world_model is None:
-        return {"error": "Simulation not initialized"}
-
-    return {
-        "running": world_model.running,
-        "tick": world_model.current_tick,
-        "width": world_model.width,
-        "height": world_model.height,
-        "num_agents": len(world_model.agents),
-    }
-
-
-# Include API routes
 app.include_router(routes.router)
 app.include_router(ws_module.router)
 
-
-# Serve static files (for React build)
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
-
-def start_simulation():
-    """Start the simulation loop."""
-    if world_model:
-        world_model.run()
+# Serve frontend build if static/ dir exists
+import os
+_static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_static_dir):
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")
 
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)

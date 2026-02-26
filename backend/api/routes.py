@@ -1,110 +1,88 @@
 """
-API Routes for WorldSim simulation.
+WorldSim — REST API Routes
+Clean endpoints with proper error handling.
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from __future__ import annotations
 
-from ..simulation.world import WorldModel
+from typing import TYPE_CHECKING
+
+from fastapi import APIRouter, HTTPException
+
+from ..models.schemas import ControlResponse, HealthResponse, WorldSummary
+
+if TYPE_CHECKING:
+    from ..simulation.world import WorldModel
 
 router = APIRouter(prefix="/api/v1", tags=["simulation"])
 
-# Global simulation instance (set by main.py)
-world_model: WorldModel | None = None
+_world: WorldModel | None = None
 
 
-def set_world_model(model: WorldModel):
-    """Set the global simulation model (called by main.py)."""
-    global world_model
-    world_model = model
+def set_world_model(model: WorldModel) -> None:
+    global _world
+    _world = model
 
 
-@router.get("/health")
+def _get_world() -> WorldModel:
+    if _world is None:
+        raise HTTPException(status_code=503, detail="Simulation not initialized")
+    return _world
+
+
+@router.get("/health", response_model=HealthResponse)
 async def health():
-    """Health check."""
-    return {"status": "ok"}
+    return HealthResponse(
+        status="healthy",
+        simulation_running=_world is not None and _world.running,
+    )
 
 
-@router.get("/status")
-async def get_status():
-    """Get simulation status."""
-    if world_model is None:
-        return {"error": "Simulation not initialized"}
-
-    return {
-        "running": world_model.running,
-        "tick": world_model.current_tick,
-        "width": world_model.width,
-        "height": world_model.height,
-        "num_agents": len(world_model.agents),
-    }
+@router.get("/status", response_model=WorldSummary)
+async def status():
+    world = _get_world()
+    return WorldSummary(**world.get_summary())
 
 
 @router.get("/state")
-async def get_state():
-    """Get full simulation state."""
-    if world_model is None:
-        return {"error": "Simulation not initialized"}
-
-    return world_model.get_state()
+async def full_state():
+    world = _get_world()
+    return world.get_state()
 
 
-@router.post("/start")
-async def start_simulation():
-    """Start the simulation."""
-    if world_model is None:
-        return {"error": "Simulation not initialized"}
-
-    world_model.running = True
-    return {"status": "started", "tick": world_model.current_tick}
-
-
-@router.post("/pause")
-async def pause_simulation():
-    """Pause the simulation."""
-    if world_model is None:
-        return {"error": "Simulation not initialized"}
-
-    world_model.running = False
-    return {"status": "paused", "tick": world_model.current_tick}
+@router.post("/start", response_model=ControlResponse)
+async def start():
+    world = _get_world()
+    if world.ended:
+        return ControlResponse(success=False, message="Simulation has ended. Reset first.")
+    world.start()
+    return ControlResponse(success=True, message="Simulation started")
 
 
-@router.post("/reset")
-async def reset_simulation():
-    """Reset the simulation."""
-    if world_model is None:
-        return {"error": "Simulation not initialized"}
-
-    # Reinitialize the model
-    from ..simulation.world import WorldModel
-
-    world_model.__init__(
-        width=world_model.width,
-        height=world_model.height,
-        num_agents=world_model.num_agents,
-    )
-
-    return {"status": "reset", "tick": world_model.current_tick}
+@router.post("/pause", response_model=ControlResponse)
+async def pause():
+    world = _get_world()
+    world.pause()
+    return ControlResponse(success=True, message="Simulation paused")
 
 
-@router.get("/regions")
-async def get_regions():
-    """Get all regions."""
-    if world_model is None:
-        return {"error": "Simulation not initialized"}
-
-    return {
-        "regions": [
-            {"x": r.x, "y": r.y, "resources": r.resource_manager.get_all()}
-            for r in world_model.regions.values()
-        ]
-    }
+@router.post("/reset", response_model=ControlResponse)
+async def reset():
+    world = _get_world()
+    world.reset()
+    return ControlResponse(success=True, message="Simulation reset")
 
 
 @router.get("/agents")
-async def get_agents():
-    """Get all agents."""
-    if world_model is None:
-        return {"error": "Simulation not initialized"}
+async def list_agents():
+    world = _get_world()
+    return [a.to_dict() for a in world.agents]
 
-    return {"agents": [agent.to_dict() for agent in world_model.agents]}
+
+@router.get("/regions/{region_key}")
+async def get_region(region_key: str):
+    world = _get_world()
+    region = world.regions.get(region_key)
+    if region is None:
+        raise HTTPException(status_code=404, detail=f"Region {region_key} not found")
+    return region.to_dict()
