@@ -1,140 +1,228 @@
 import React from 'react'
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-} from 'recharts'
-import { useWorldStore, RegionState } from '../store/useWorldStore'
+import { useWorldStore, RegionState, ClimateEvent } from '../store/useWorldStore'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
-const RC: Record<string, string> = {
-  CBD_CORE:'#FF4444', WATERFRONT:'#4488FF', INDUSTRIAL:'#FFCC00',
-  SLUMS:'#AA2222', HILLY_SUBURBS:'#996633',
-}
-const AC: Record<string,string> = {
-  Trade:'text-emerald-400 border-emerald-700', Hoard:'text-amber-400 border-amber-700',
-  Migrate:'text-sky-400 border-sky-700', Idle:'text-slate-500 border-slate-700',
+// ── Nation config ─────────────────────────────────────────────────────────────
+const NATION_META: Record<string, { flag: string; strategy: string; tribe: string; color: string; bg: string }> = {
+  AQUILONIA:  { flag:'🛡️', strategy:'Fortress',      tribe:'IRON',  color:'#4A9EFF', bg:'rgba(74,158,255,0.07)' },
+  VERDANTIS:  { flag:'🌿', strategy:'Equilibrium',   tribe:'LEAF',  color:'#4CAF50', bg:'rgba(76,175,80,0.07)'  },
+  IGNIS_CORE: { flag:'🔥', strategy:'Expansionist',  tribe:'FIRE',  color:'#FF7043', bg:'rgba(255,112,67,0.07)' },
+  TERRANOVA:  { flag:'⚔️', strategy:'Parasite',      tribe:'IRON',  color:'#A08040', bg:'rgba(160,128,64,0.07)' },
+  THE_NEXUS:  { flag:'🔮', strategy:'Collaborator',  tribe:'NEXUS', color:'#AB7FE0', bg:'rgba(171,127,224,0.07)'},
 }
 
-function StatBar({ label, value, color }: { label:string; value:number; color:string }) {
+const ACTION_COLORS: Record<string, string> = {
+  Conserve: '#4fc3f7', Trade: '#66ee88', Expand: '#ffcc44', Conflict: '#ff5555'
+}
+const ACTION_ICONS: Record<string, string> = {
+  Conserve: '🛡️', Trade: '🤝', Expand: '⬆️', Conflict: '⚔️'
+}
+
+const CLIMATE_META: Record<string, { icon: string; label: string; color: string; bg: string }> = {
+  Drought:    { icon: '☀️', label: 'DROUGHT',     color: '#ff9944', bg: 'rgba(180,80,0,0.25)'   },
+  SolarFlare: { icon: '⚡', label: 'SOLAR FLARE', color: '#ffee44', bg: 'rgba(160,120,0,0.25)'  },
+  Blight:     { icon: '🍂', label: 'BLIGHT',      color: '#88bb44', bg: 'rgba(40,80,0,0.25)'    },
+}
+
+// ── Resource bar ──────────────────────────────────────────────────────────────
+function ResourceBar({ label, value, color }: { label: string; value: number; color: string }) {
+  const pct = Math.round(value * 100)
   return (
-    <div>
-      <div className="flex justify-between text-[10px] text-slate-400 mb-0.5">
-        <span>{label}</span><span className="font-mono">{Math.round(value)}%</span>
+    <div style={{ marginBottom: 3 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#7a8899', marginBottom: 2, fontFamily: 'JetBrains Mono, monospace' }}>
+        <span>{label}</span><span style={{ color }}>{pct}%</span>
       </div>
-      <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
-        <div className="h-full rounded-full transition-all duration-500"
-          style={{ width:`${Math.round(value)}%`, background:color }} />
+      <div style={{ background: '#1a1f2a', borderRadius: 3, height: 5, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.5s ease' }} />
       </div>
     </div>
   )
 }
 
-export default function Dashboard() {
-  const regions    = useWorldStore(s => s.regions)
-  const tick       = useWorldStore(s => s.tick)
-  const history    = useWorldStore(s => s.history)
-  const connected  = useWorldStore(s => s.connected)
-  const isRunning  = useWorldStore(s => s.isRunning)
-  const toggleRunning = useWorldStore(s => s.toggleRunning)
-  const player     = useWorldStore(s => s.player)
+// ── Region card ───────────────────────────────────────────────────────────────
+function RegionCard({ r }: { r: RegionState }) {
+  const meta = NATION_META[r.id]
+  if (!meta) return null
+
+  const crimePct = Math.round(r.crime_rate * 100)
+  const isHighCrime = r.crime_rate > 0.65
 
   return (
-    <aside className="flex flex-col h-full gap-3 overflow-y-auto p-3">
-
+    <div style={{
+      background: meta.bg,
+      border: `1px solid ${meta.color}33`,
+      borderLeft: `3px solid ${meta.color}`,
+      borderRadius: 8, padding: '8px 10px', marginBottom: 8,
+    }}>
       {/* Header */}
-      <div className="flex items-center gap-2">
-        <h1 className="text-lg font-black tracking-wide text-white flex-1">🌐 WorldSim</h1>
-        <span className={`inline-flex items-center gap-1 text-[10px] font-mono ${connected?'text-emerald-400':'text-red-400'}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${connected?'bg-emerald-400 animate-pulse':'bg-red-500'}`}/>
-          {connected?'LIVE':'OFFLINE'}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+        <span style={{ fontSize: 16 }}>{meta.flag}</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: meta.color, fontFamily: 'Inter, sans-serif' }}>{r.name}</div>
+          <div style={{ fontSize: 9, color: '#606880', fontFamily: 'monospace' }}>{r.title} · Tribe: {r.tribe}</div>
+        </div>
+        <div style={{
+          fontSize: 9, fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,
+          background: `${ACTION_COLORS[r.last_action]}22`, color: ACTION_COLORS[r.last_action],
+          padding: '2px 5px', borderRadius: 4, border: `1px solid ${ACTION_COLORS[r.last_action]}44`,
+        }}>
+          {ACTION_ICONS[r.last_action]} {r.last_action}
+        </div>
+      </div>
+
+      {/* Resources */}
+      <ResourceBar label="💧 Water"  value={r.resources.water}  color="#4A9EFF" />
+      <ResourceBar label="🌾 Food"   value={r.resources.food}   color="#4CAF50" />
+      <ResourceBar label="⚡ Energy" value={r.resources.energy} color="#FF7043" />
+      <ResourceBar label="🏔️ Land"   value={r.resources.land}   color="#A08040" />
+
+      {/* Footer */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, fontSize: 9, color: '#606880', fontFamily: 'monospace' }}>
+        <span style={{ color: isHighCrime ? '#ff5555' : '#66cc66' }}>
+          {isHighCrime ? '🚨' : '✅'} {crimePct}% crime
         </span>
+        <span>👥 {(r.population / 1_000_000).toFixed(1)}M</span>
       </div>
+    </div>
+  )
+}
 
-      {/* Start / Stop button */}
-      <button
-        onClick={toggleRunning}
-        className={`w-full py-2.5 rounded-xl font-bold text-sm tracking-wide transition-all duration-200
-          ${isRunning
-            ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/50'
-            : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/50'
-          }`}
-      >
-        {isRunning ? '⏹ Stop Simulation' : '▶ Start Simulation'}
-      </button>
+// ── Climate banner ────────────────────────────────────────────────────────────
+function ClimateBanner({ event }: { event: ClimateEvent }) {
+  if (!event.type) return null
+  const meta = CLIMATE_META[event.type]
+  if (!meta) return null
 
-      {/* Tick */}
-      <div className="glass rounded-xl px-3 py-2 flex items-center">
-        <span className="text-xs text-slate-500 font-mono uppercase tracking-widest">Tick</span>
-        <span className="ml-auto font-mono text-xl font-bold text-white">{tick}</span>
-        <span className={`ml-2 text-xs px-2 py-0.5 rounded font-mono border ${isRunning?'text-emerald-400 border-emerald-800 bg-emerald-950/60':'text-amber-400 border-amber-800 bg-amber-950/60'}`}>
-          {isRunning?'RUNNING':'PAUSED'}
-        </span>
-      </div>
-
-      {/* Player stats */}
-      <div className="glass rounded-xl p-3 border border-blue-900/40">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-blue-400 text-lg">🧍</span>
-          <span className="text-xs font-bold text-blue-300">Citizen</span>
-          <span className="ml-auto text-[10px] font-mono text-slate-500">
-            📍 {player.currentRegion?.replace('_',' ') ?? '—'}
-          </span>
-          {player.isMoving && <span className="text-[10px] text-sky-400 animate-pulse">moving…</span>}
+  return (
+    <div style={{
+      background: meta.bg,
+      border: `1px solid ${meta.color}55`,
+      borderRadius: 8, padding: '7px 10px', marginBottom: 10,
+      display: 'flex', alignItems: 'center', gap: 8,
+      animation: 'pulse 1s ease infinite',
+    }}>
+      <span style={{ fontSize: 18 }}>{meta.icon}</span>
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: meta.color, fontFamily: 'Inter, sans-serif', letterSpacing: 1 }}>
+          {meta.label} ACTIVE
         </div>
-        <div className="flex flex-col gap-1.5">
-          <StatBar label="⚡ Energy"  value={player.energy}    color="#FFCC00" />
-          <StatBar label="🍖 Hunger"  value={player.hunger}    color="#22cc77" />
-          <StatBar label="💧 Thirst"  value={player.thirst}    color="#4488FF" />
-          <StatBar label="🛡 Safety"  value={player.safety}    color="#cc44ff" />
-          <StatBar label="😊 Happiness" value={player.happiness} color="#ff8844" />
+        <div style={{ fontSize: 9, color: '#888', fontFamily: 'monospace' }}>
+          {event.duration_remaining} ticks remaining
         </div>
       </div>
+    </div>
+  )
+}
 
-      {/* Region cards */}
-      {regions.map((r: RegionState) => (
-        <div key={r.id} className="glass rounded-xl p-3 border-l-4" style={{ borderColor:RC[r.id] }}>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-white">{r.name}</span>
-            <span className={`text-[10px] font-mono border rounded px-1.5 py-0.5 ${AC[r.last_action]??AC['Idle']}`}>
-              {r.last_action}
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-            {Object.entries(r.resources).map(([k,v])=>(
-              <div key={k}>
-                <div className="flex justify-between text-[10px] text-slate-400 mb-0.5">
-                  <span className="capitalize">{k}</span>
-                  <span>{Math.round((v as number)*100)}%</span>
-                </div>
-                <div className="h-1 rounded-full bg-slate-800">
-                  <div className="h-full rounded-full transition-all duration-500"
-                    style={{ width:`${Math.round((v as number)*100)}%`, background:RC[r.id] }} />
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="flex gap-3 mt-2 text-[10px] font-mono">
-            <span className="text-rose-400">⚠ {Math.round(r.crime_rate*100)}%</span>
-            <span className="text-slate-400">👥 {(r.population/1000).toFixed(0)}k</span>
-          </div>
-        </div>
-      ))}
+// ── Sidebar chart ─────────────────────────────────────────────────────────────
+const CHART_COLORS: Record<string, string> = {
+  AQUILONIA: '#4A9EFF', VERDANTIS: '#4CAF50', IGNIS_CORE: '#FF7043',
+  TERRANOVA: '#A08040', THE_NEXUS: '#AB7FE0',
+}
 
-      {/* Crime history */}
-      {history.length > 1 && (
-        <div className="glass rounded-xl p-3">
-          <p className="text-[10px] text-slate-500 mb-2 font-mono uppercase tracking-widest">Crime History</p>
-          <ResponsiveContainer width="100%" height={110}>
-            <LineChart data={history} margin={{top:0,right:0,bottom:0,left:-24}}>
-              <XAxis dataKey="tick" tick={{fontSize:8,fill:'#64748b'}}/>
-              <YAxis domain={[0,1]} tick={{fontSize:8,fill:'#64748b'}}/>
-              <Tooltip contentStyle={{background:'#0f172a',border:'none',fontSize:9}} labelStyle={{color:'#94a3b8'}}/>
-              {regions.map(r=>(
-                <Line key={r.id} type="monotone" dataKey={r.id} name={r.name}
-                  dot={false} strokeWidth={1.5} stroke={RC[r.id]} isAnimationActive={false}/>
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
+function CrimeChart({ history }: { history: { tick: number; [k: string]: number }[] }) {
+  const data = history.slice(-40)
+  const ids = ['AQUILONIA', 'VERDANTIS', 'IGNIS_CORE', 'TERRANOVA', 'THE_NEXUS']
+  // Remap history keys
+  const mapped = data.map(h => {
+    const row: Record<string, number> = { tick: h.tick }
+    for (const id of ids) row[id] = +(h[id + '_crime'] ?? 0)
+    return row
+  })
+
+  return (
+    <div style={{ marginTop: 4, height: 90 }}>
+      <div style={{ fontSize: 10, color: '#445566', fontFamily: 'monospace', marginBottom: 4 }}>
+        ↑ CRIME RATE (last 40 ticks)
+      </div>
+      <ResponsiveContainer width="100%" height={75}>
+        <LineChart data={mapped}>
+          <XAxis dataKey="tick" hide />
+          <YAxis domain={[0, 1]} hide />
+          <Tooltip
+            contentStyle={{ background: '#0a0f1a', border: '1px solid #223', fontSize: 9, fontFamily: 'monospace' }}
+            formatter={(v: number) => [`${Math.round(v * 100)}%`]}
+          />
+          {ids.map(id => (
+            <Line key={id} type="monotone" dataKey={id} dot={false}
+              stroke={CHART_COLORS[id]} strokeWidth={1.5} isAnimationActive={false} />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+// ── Main Dashboard ────────────────────────────────────────────────────────────
+export default function Dashboard() {
+  const regions      = useWorldStore(s => s.regions)
+  const tick         = useWorldStore(s => s.tick)
+  const connected    = useWorldStore(s => s.connected)
+  const isRunning    = useWorldStore(s => s.isRunning)
+  const toggleRun    = useWorldStore(s => s.toggleRunning)
+  const climateEvent = useWorldStore(s => s.climateEvent)
+  const history      = useWorldStore(s => s.history)
+
+  return (
+    <div style={{
+      width: '100%', height: '100%', overflowY: 'auto', overflowX: 'hidden',
+      background: '#05080f', color: '#c0c8d8', fontFamily: 'Inter, sans-serif',
+      padding: '12px 10px', boxSizing: 'border-box',
+    }}>
+      {/* Header */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: '#d0d8f0', letterSpacing: 0.5 }}>
+          🌍 WorldSim 2.0
         </div>
-      )}
-    </aside>
+        <div style={{ fontSize: 9, color: '#445566', fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>
+          5 Sovereign Nations · Autonomous RL
+        </div>
+      </div>
+
+      {/* Status strip */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+        <div style={{
+          flex: 1, fontSize: 10, fontFamily: 'monospace',
+          color: connected ? '#44ee88' : '#ff5555',
+          background: connected ? 'rgba(68,238,136,0.08)' : 'rgba(255,85,85,0.08)',
+          border: `1px solid ${connected ? '#44ee8844' : '#ff555544'}`,
+          borderRadius: 5, padding: '3px 7px',
+        }}>
+          {connected ? '● LIVE' : '○ OFFLINE'} — Tick #{tick.toLocaleString()}
+        </div>
+        <button
+          onClick={toggleRun}
+          style={{
+            background: isRunning ? 'rgba(255,100,100,0.15)' : 'rgba(68,238,136,0.15)',
+            border: `1px solid ${isRunning ? '#ff644444' : '#44ee8844'}`,
+            color: isRunning ? '#ff8888' : '#44ee88',
+            borderRadius: 5, fontSize: 10, fontFamily: 'monospace',
+            padding: '3px 10px', cursor: 'pointer',
+          }}
+        >
+          {isRunning ? '⏸ Pause' : '▶ Resume'}
+        </button>
+      </div>
+
+      {/* Climate event */}
+      <ClimateBanner event={climateEvent} />
+
+      {/* Tribe info */}
+      <div style={{ fontSize: 9, color: '#334455', fontFamily: 'monospace', marginBottom: 8, padding: '5px 7px', background: 'rgba(255,255,255,0.02)', borderRadius: 5 }}>
+        🏛 Tribe IRON (Aquilonia + Terranova): 15% Trade Bonus
+      </div>
+
+      {/* Nation cards */}
+      {regions.map(r => <RegionCard key={r.id} r={r} />)}
+
+      {/* Crime chart */}
+      <CrimeChart history={history} />
+
+      {/* Legend */}
+      <div style={{ marginTop: 10, fontSize: 9, color: '#334455', fontFamily: 'monospace', lineHeight: 1.8 }}>
+        🛡️ Conserve · 🤝 Trade · ⬆️ Expand · ⚔️ Conflict
+        <br />Energy Entropy: crime &gt;70% → −5% energy/tick
+      </div>
+    </div>
   )
 }
