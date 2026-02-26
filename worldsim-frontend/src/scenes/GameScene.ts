@@ -1,16 +1,17 @@
 import Phaser from "phaser";
-import type { WorldState, RegionState, PresidentAgent } from "../types";
+import type { WorldState } from "../types";
 
 // ─── Isometric helpers ────────────────────────────────────────────────────────
-const TILE_W = 64; // rendered tile width  (2× the 32px logical size)
-const TILE_H = 32; // rendered tile height
+const TILE_W = 64;
+const TILE_H = 32;
+const BLOCK_H = 16; // height of the block sides
 const ISO_ORIGIN_X = 600;
-const ISO_ORIGIN_Y = 80;
+const ISO_ORIGIN_Y = 120;
 
-function toIso(col: number, row: number): { x: number; y: number } {
+function toIso(col: number, row: number, height: number = 0): { x: number; y: number } {
   return {
     x: ISO_ORIGIN_X + (col - row) * (TILE_W / 2),
-    y: ISO_ORIGIN_Y + (col + row) * (TILE_H / 2),
+    y: ISO_ORIGIN_Y + (col + row) * (TILE_H / 2) - height * BLOCK_H,
   };
 }
 
@@ -19,8 +20,8 @@ interface RegionDef {
   id: string;
   label: string;
   zone: string;
-  tileColor: number;
-  overlayColor: number;
+  baseBlock: string;
+  structureBlock: string;
   borderColor: number;
   centerCol: number;
   centerRow: number;
@@ -28,11 +29,11 @@ interface RegionDef {
 }
 
 const REGIONS: RegionDef[] = [
-  { id: "aquilonia", label: "🌊 AQUILONIA", zone: "WATER RICH", tileColor: 0x0a2a4a, overlayColor: 0x0066ff, borderColor: 0x4a9eff, centerCol: 4, centerRow: 3, radius: 3 },
-  { id: "verdantis", label: "🌿 VERDANTIS", zone: "FOOD RICH", tileColor: 0x0a3a0a, overlayColor: 0x00aa44, borderColor: 0x66cc44, centerCol: 14, centerRow: 3, radius: 3 },
-  { id: "ignis_core", label: "⚡ IGNIS CORE", zone: "ENERGY RICH", tileColor: 0x3a1a05, overlayColor: 0xff8800, borderColor: 0xffaa00, centerCol: 9, centerRow: 7, radius: 4 },
-  { id: "terranova", label: "🗻 TERRANOVA", zone: "LAND RICH", tileColor: 0x2a1a1a, overlayColor: 0x884400, borderColor: 0xcc6600, centerCol: 4, centerRow: 11, radius: 3 },
-  { id: "nexus", label: "✦ THE NEXUS", zone: "BALANCED HUB", tileColor: 0x3a3a4a, overlayColor: 0xffffff, borderColor: 0xaabbcc, centerCol: 14, centerRow: 11, radius: 3 },
+  { id: "aquilonia", label: "🌊 AQUILONIA", zone: "WATER RICH", baseBlock: "water_block", structureBlock: "prismarine_block", borderColor: 0x4a9eff, centerCol: 4, centerRow: 3, radius: 3 },
+  { id: "verdantis", label: "🌿 VERDANTIS", zone: "FOOD RICH", baseBlock: "grass_block", structureBlock: "log_block", borderColor: 0x66cc44, centerCol: 14, centerRow: 3, radius: 3 },
+  { id: "ignis_core", label: "⚡ IGNIS CORE", zone: "ENERGY RICH", baseBlock: "magma_block", structureBlock: "iron_block", borderColor: 0xffaa00, centerCol: 9, centerRow: 7, radius: 4 },
+  { id: "terranova", label: "🗻 TERRANOVA", zone: "LAND RICH", baseBlock: "stone_block", structureBlock: "cobblestone_block", borderColor: 0xcc6600, centerCol: 4, centerRow: 11, radius: 3 },
+  { id: "nexus", label: "✦ THE NEXUS", zone: "BALANCED HUB", baseBlock: "quartz_block", structureBlock: "gold_block", borderColor: 0xaabbcc, centerCol: 14, centerRow: 11, radius: 3 },
 ];
 
 const ACTION_COLORS: Record<number, number> = {
@@ -51,357 +52,276 @@ const ACTION_LABELS: Record<number, string> = {
 
 interface PresidentSprite {
   regionId: string;
-  body: Phaser.GameObjects.Rectangle;
-  head: Phaser.GameObjects.Rectangle;
+  container: Phaser.GameObjects.Container;
   tag: Phaser.GameObjects.Text;
+  bubbleContainer: Phaser.GameObjects.Container;
+  bubbleText: Phaser.GameObjects.Text;
+  aura: Phaser.GameObjects.Arc;
+}
+
+interface ResourceBars {
+  water: Phaser.GameObjects.Rectangle;
+  food: Phaser.GameObjects.Rectangle;
+  energy: Phaser.GameObjects.Rectangle;
+  land: Phaser.GameObjects.Rectangle;
 }
 
 export default class GameScene extends Phaser.Scene {
   private crimeOverlays: Map<string, Phaser.GameObjects.Rectangle> = new Map();
   private weatherOverlays: Map<string, Phaser.GameObjects.Rectangle> = new Map();
   private rainEmitters: Map<string, Phaser.GameObjects.Particles.ParticleEmitter> = new Map();
-
+  private blightEmitters: Map<string, Phaser.GameObjects.Particles.ParticleEmitter> = new Map();
   private presidents: Map<string, PresidentSprite> = new Map();
-
+  private groundBlocks: Map<string, Phaser.GameObjects.Image[]> = new Map();
   private smokeEmitters: Phaser.GameObjects.Particles.ParticleEmitter[] = [];
-  private fireEmitters: Phaser.GameObjects.Particles.ParticleEmitter[] = [];
-  private neonWindows: Phaser.GameObjects.Rectangle[] = [];
-  private windmillBlades: Phaser.GameObjects.Container[] = [];
-  private waterRipples: Phaser.GameObjects.Ellipse[] = [];
-
-  private groundLayer!: Phaser.GameObjects.Graphics;
-  private buildingLayer!: Phaser.GameObjects.Graphics;
-  private uiLayer!: Phaser.GameObjects.Graphics;
+  private tradeBeams: Phaser.GameObjects.Graphics | null = null;
+  private actionBeams: Phaser.GameObjects.Graphics | null = null;
+  private resourceBars: Map<string, ResourceBars> = new Map();
+  private lastResources: Map<string, { water: number; food: number; energy: number; land: number }> = new Map();
 
   constructor() {
     super("GameScene");
   }
 
   preload() {
-    // No external assets required
+    // Particles placeholders (empty graphics)
+    const g = this.make.graphics({ x: 0, y: 0 });
+    g.fillStyle(0xffffff); g.fillRect(0, 0, 2, 2); g.generateTexture("rain_particle", 2, 2);
+    g.clear(); g.fillStyle(0x00ff00); g.fillRect(0, 0, 3, 3); g.generateTexture("blight_particle", 3, 3);
+    g.clear(); g.fillStyle(0x555555, 0.5); g.fillCircle(4, 4, 4); g.generateTexture("smoke_particle", 8, 8);
+    g.destroy();
   }
 
   create() {
+    this.generateVoxelTextures();
+
     const W = this.scale.width;
     const H = this.scale.height;
 
-    // ── Sky background ─────────────────────────────────────────────────────
+    // Sky background
     const sky = this.add.graphics();
-    sky.fillGradientStyle(0x0d0d2b, 0x0d0d2b, 0x0a1a0a, 0x0a1a0a, 1);
+    sky.fillGradientStyle(0x71b6f9, 0x71b6f9, 0xa1d5f2, 0xa1d5f2, 1);
     sky.fillRect(0, 0, W, H);
 
-    for (let i = 0; i < 60; i++) {
-      const sx = Phaser.Math.Between(0, W);
-      const sy = Phaser.Math.Between(0, H * 0.35);
-      const ss = Phaser.Math.FloatBetween(0.5, 2);
-      const star = this.add.rectangle(sx, sy, ss, ss, 0xffffff, 0.8);
-      this.tweens.add({ targets: star, alpha: 0.2, duration: 800 + Math.random() * 1200, yoyo: true, repeat: -1 });
+    // Voxel Clouds
+    for (let i = 0; i < 8; i++) {
+      const cx = Phaser.Math.Between(0, W);
+      const cy = Phaser.Math.Between(0, H * 0.3);
+      const cw = Phaser.Math.Between(40, 100);
+      const ch = Phaser.Math.Between(20, 40);
+      this.add.rectangle(cx, cy, cw, ch, 0xffffff, 0.7).setDepth(0);
     }
 
-    this.groundLayer = this.add.graphics().setDepth(1);
-    this.buildingLayer = this.add.graphics().setDepth(2);
-    this.uiLayer = this.add.graphics().setDepth(100);
+    this.tradeBeams = this.add.graphics().setDepth(150);
+    this.actionBeams = this.add.graphics().setDepth(160);
 
-    // ── Draw the city ──────────────────────────────────────────────────────
+    // Draw world
     this.drawAllRegions();
     this.drawRegionLabels();
-    this.drawHexagonBorders();
-    this.addAnimatedElements();
     this.setupPresidents();
 
-    // ── Title banner ───────────────────────────────────────────────────────
-    this.add.text(W / 2, 10, "⚡ WORLDSIM AUTONOMOUS ENGINE ⚡", {
+    // Banner
+    this.add.text(W / 2, 15, "⛏ WORLDSIM: CRAFT-CORE EDITION ⛏", {
       fontFamily: "'Press Start 2P', monospace",
-      fontSize: "14px",
-      color: "#00ffff",
-      stroke: "#003344",
-      strokeThickness: 4,
-      shadow: { offsetX: 2, offsetY: 2, color: "#ff00ff", blur: 8, fill: true },
-    }).setOrigin(0.5, 0).setDepth(200);
+      fontSize: "14px", color: "#ffffff", stroke: "#000000", strokeThickness: 6,
+      shadow: { offsetX: 3, offsetY: 3, color: "#444444", blur: 0, fill: true },
+    }).setOrigin(0.5, 0).setDepth(300);
 
     this.drawLegend();
   }
 
-  private drawAllRegions() {
-    REGIONS.forEach((r) => this.drawRegion(r));
+  private generateVoxelTextures() {
+    const blockTypes = [
+      { name: 'grass_block', top: 0x55aa33, side: 0x795548, bottom: 0x5d4037, pattern: 'noise' },
+      { name: 'stone_block', top: 0x888888, side: 0x777777, bottom: 0x666666, pattern: 'dots' },
+      { name: 'cobblestone_block', top: 0x777777, side: 0x666666, bottom: 0x555555, pattern: 'grid' },
+      { name: 'water_block', top: 0x3366ff, side: 0x2255ee, bottom: 0x1144dd, pattern: 'waves', alpha: 0.7 },
+      { name: 'magma_block', top: 0xff4400, side: 0xcc3300, bottom: 0x882200, pattern: 'cracks' },
+      { name: 'iron_block', top: 0xdddddd, side: 0xcccccc, bottom: 0xbbbbbb, pattern: 'none' },
+      { name: 'quartz_block', top: 0xffffff, side: 0xeeeeee, bottom: 0xdddddd, pattern: 'none' },
+      { name: 'gold_block', top: 0xffcc00, side: 0xeeaa00, bottom: 0xcc8800, pattern: 'none' },
+      { name: 'prismarine_block', top: 0x44aaaa, side: 0x339999, bottom: 0x228888, pattern: 'grid' },
+      { name: 'log_block', top: 0x5d4037, side: 0x3e2723, bottom: 0x3e2723, pattern: 'rings' },
+      { name: 'leaves_block', top: 0x116622, side: 0x0a551a, bottom: 0x074412, pattern: 'dots' },
+      { name: 'sand_block', top: 0xeeeebb, side: 0xddddaa, bottom: 0xcccc99, pattern: 'noise' },
+      { name: 'mycelium_block', top: 0x884488, side: 0x663366, bottom: 0x5d4037, pattern: 'noise' },
+      { name: 'farmland_block', top: 0x4e342e, side: 0x3e2723, bottom: 0x3e2723, pattern: 'rows' },
+    ];
+    blockTypes.forEach(bt => this.createBlockTexture(bt));
   }
 
-  private drawRegion(r: RegionDef) {
-    const g = this.groundLayer;
-    const bg = this.buildingLayer;
+  private createBlockTexture(bt: any) {
+    if (this.textures.exists(bt.name)) return;
+    const g = this.make.graphics({ x: 0, y: 0 });
+    const w = TILE_W, h = TILE_H + BLOCK_H;
+    const cx = w / 2, cy = TILE_H / 2;
 
+    g.fillStyle(bt.side, bt.alpha || 1);
+    g.fillPoints([{ x: cx - TILE_W / 2, y: cy }, { x: cx, y: cy + TILE_H / 2 }, { x: cx, y: cy + TILE_H / 2 + BLOCK_H }, { x: cx - TILE_W / 2, y: cy + BLOCK_H }], true);
+    g.fillStyle(bt.bottom, bt.alpha || 1);
+    g.fillPoints([{ x: cx + TILE_W / 2, y: cy }, { x: cx, y: cy + TILE_H / 2 }, { x: cx, y: cy + TILE_H / 2 + BLOCK_H }, { x: cx + TILE_W / 2, y: cy + BLOCK_H }], true);
+    g.fillStyle(bt.top, bt.alpha || 1);
+    g.fillPoints([{ x: cx, y: 0 }, { x: cx + TILE_W / 2, y: cy }, { x: cx, y: cy * 2 }, { x: cx - TILE_W / 2, y: cy }], true);
+
+    if (bt.pattern === 'noise' || bt.pattern === 'dots') {
+      g.fillStyle(0x000000, 0.1);
+      for (let i = 0; i < 20; i++) g.fillRect(Phaser.Math.Between(cx - 15, cx + 15), Phaser.Math.Between(0, cy * 2), 2, 2);
+    }
+    g.generateTexture(bt.name, w, h);
+    g.destroy();
+  }
+
+  private drawAllRegions() { REGIONS.forEach((r) => this.drawRegion(r)); }
+
+  private drawRegion(r: RegionDef) {
     for (let dc = -r.radius; dc <= r.radius; dc++) {
       for (let dr = -r.radius; dr <= r.radius; dr++) {
         if (Math.abs(dc) + Math.abs(dr) > r.radius) continue;
-        const col = r.centerCol + dc;
-        const row = r.centerRow + dr;
-        const { x, y } = toIso(col, row);
-
-        const groundColor = this.getGroundColor(r, dc, dr);
-        g.fillStyle(groundColor, 1);
-        g.fillPoints([
-          { x: x, y: y - TILE_H / 2 },
-          { x: x + TILE_W / 2, y: y },
-          { x: x, y: y + TILE_H / 2 },
-          { x: x - TILE_W / 2, y: y },
-        ], true);
-
-        g.lineStyle(1, 0x000000, 0.25);
-        g.strokePoints([
-          { x: x, y: y - TILE_H / 2 },
-          { x: x + TILE_W / 2, y: y },
-          { x: x, y: y + TILE_H / 2 },
-          { x: x - TILE_W / 2, y: y },
-        ], true);
-
-        // Leave exact center empty for president
-        if (dc !== 0 || dr !== 0) {
-          this.drawBuildingOnTile(bg, r, dc, dr, x, y);
-        }
+        const col = r.centerCol + dc, row = r.centerRow + dr;
+        const pos = toIso(col, row);
+        const block = this.add.image(pos.x, pos.y, r.baseBlock).setOrigin(0.5, 0).setDepth(pos.y / 100);
+        if (!this.groundBlocks.has(r.id)) this.groundBlocks.set(r.id, []);
+        this.groundBlocks.get(r.id)!.push(block);
+        if (dc !== 0 || dr !== 0) this.drawVoxelBuilding(r, dc, dr, col, row);
       }
     }
-
     const { x: cx, y: cy } = toIso(r.centerCol, r.centerRow);
-    const ow = (r.radius * 2 + 1) * TILE_W * 0.85;
-    const oh = (r.radius * 2 + 1) * TILE_H * 1.2;
-
-    // Base overlay (morale/climate effect)
-    const overlay = this.add.rectangle(cx, cy, ow, oh, r.overlayColor, 0.05)
-      .setDepth(49)
-      .setOrigin(0.5, 0.5);
+    const overlay = this.add.rectangle(cx, cy, (r.radius * 2 + 1) * TILE_W * 0.8, (r.radius * 2 + 1) * TILE_H * 1.2, 0xff0000, 0).setDepth(140).setOrigin(0.5);
     this.crimeOverlays.set(r.id, overlay);
-
-    // Weather overlay specifically for drought yellow tint
-    const wOverlay = this.add.rectangle(cx, cy, ow, oh, 0xaa8800, 0.0)
-      .setDepth(48)
-      .setOrigin(0.5, 0.5);
+    const wOverlay = this.add.rectangle(cx, cy, (r.radius * 2 + 1) * TILE_W * 0.8, (r.radius * 2 + 1) * TILE_H * 1.2, 0xaa8800, 0).setDepth(141).setOrigin(0.5);
     this.weatherOverlays.set(r.id, wOverlay);
 
-    // Rain emitter
-    if (!this.textures.exists("rain_particle")) {
-      const p = this.make.graphics({ x: 0, y: 0 });
-      p.fillStyle(0x88ccff, 0.8);
-      p.fillRect(0, 0, 2, 8);
-      p.generateTexture("rain_particle", 2, 8);
-      p.destroy();
-    }
-    const rain = this.add.particles(cx, cy - 80, "rain_particle", {
-      speedY: { min: 200, max: 300 },
-      speedX: { min: -10, max: 10 },
-      lifespan: 600,
-      frequency: -1, // off by default
-      quantity: 5,
-      scale: { start: 1, end: 0.5 },
-      alpha: { start: 0.5, end: 0 },
-      emitZone: { type: 'random', source: new Phaser.Geom.Rectangle(-ow / 2, -50, ow, 100) }
-    }).setDepth(50);
+    const rain = this.add.particles(cx, cy - 100, "rain_particle", {
+      speedY: { min: 300, max: 400 }, lifespan: 600, frequency: 20, emitting: false,
+      scale: 0.8, alpha: { start: 0.6, end: 0 },
+      emitZone: { type: 'random', source: new Phaser.Geom.Rectangle(-100, -50, 200, 100) } as any
+    }).setDepth(150);
     this.rainEmitters.set(r.id, rain);
+
+    const blight = this.add.particles(cx, cy, "blight_particle", {
+      speed: { min: 10, max: 30 }, lifespan: 1500, frequency: 50, emitting: false,
+      scale: { start: 1, end: 2 }, alpha: { start: 0.4, end: 0 },
+      emitZone: { type: 'random', source: new Phaser.Geom.Circle(0, 0, 80) } as any
+    }).setDepth(150);
+    this.blightEmitters.set(r.id, blight);
+
+    // Mini resource utilisation bars (W/F/E/L) floating above the region
+    const barWidth = 6;
+    const barMaxHeight = 22;
+    const barGap = 3;
+    const baseY = cy - (r.radius * TILE_H) - 20;
+
+    const mkBar = (index: number, color: number): Phaser.GameObjects.Rectangle => {
+      const x = cx + (index - 1.5) * (barWidth + barGap);
+      const bg = this.add.rectangle(x, baseY, barWidth, barMaxHeight, 0x000000, 0.5).setOrigin(0.5, 1).setDepth(190);
+      const fill = this.add.rectangle(x, baseY, barWidth - 2, 2, color, 0.9).setOrigin(0.5, 1).setDepth(191);
+      return fill;
+    };
+
+    const waterBar = mkBar(0, 0x3399ff);
+    const foodBar = mkBar(1, 0x66cc44);
+    const energyBar = mkBar(2, 0xffdd00);
+    const landBar = mkBar(3, 0xcc9966);
+
+    this.resourceBars.set(r.id, { water: waterBar, food: foodBar, energy: energyBar, land: landBar });
   }
 
-  private getGroundColor(r: RegionDef, dc: number, dr: number): number {
-    switch (r.id) {
-      case "aquilonia": {
-        const dist = Math.sqrt(dc * dc + dr * dr);
-        if (dist >= r.radius - 0.5) return 0x0044aa; // water around
-        return (dc + dr) % 2 === 0 ? 0x0a2a4a : 0x051a3a;
-      }
-      case "verdantis":
-        return (dc + dr) % 2 === 0 ? 0x1a3a10 : 0x142e0c;
-      case "ignis_core":
-        return (dc + dr) % 2 === 0 ? 0x3a1a05 : 0x2a1000;
-      case "terranova":
-        return (dc + dr) % 2 === 0 ? 0x2a1a1a : 0x201010;
-      case "nexus":
-        return (dc + dr) % 2 === 0 ? 0x3a3a4a : 0x303040;
-      default:
-        return r.tileColor;
-    }
-  }
-
-  private drawBuildingOnTile(g: Phaser.GameObjects.Graphics, r: RegionDef, dc: number, dr: number, x: number, y: number) {
+  private drawVoxelBuilding(r: RegionDef, dc: number, dr: number, col: number, row: number) {
+    const pos = toIso(col, row);
     const dist = Math.abs(dc) + Math.abs(dr);
-
     switch (r.id) {
-      case "ignis_core":
-        if (dist <= 2 && (dc + dr) % 2 === 0) {
-          const h = 40 + Math.abs(dc * 12 + dr * 8);
-          this.drawSkyscraper(g, x, y, h);
-        } else if (dist === 1) {
-          this.drawFactory(g, x, y);
-        }
-        break;
-
       case "aquilonia":
-        if (Math.abs(dc) + Math.abs(dr) >= r.radius) {
-          if ((dc + dr) % 2 === 0) this.drawBoat(g, x, y + 8);
-        } else if (dc === -1 && dr === 1) {
-          this.drawWindmill(x, y);
-        } else if ((dc + dr) % 2 === 0) {
-          this.drawHouse(g, x, y);
-        }
+        if (dist === r.radius) this.add.image(pos.x, pos.y - 12, "prismarine_block").setScale(0.6).setOrigin(0.5, 0).setDepth(pos.y / 100 + 1);
+        else if ((dc + dr) % 3 === 0) this.drawVoxelMonument(pos.x, pos.y);
         break;
-
       case "verdantis":
-        if ((dc + dr) % 3 === 0) this.drawTree(g, x, y);
-        else if ((dc + dr) % 3 === 1) this.drawFarmTile(g, x, y);
-        break;
-
-      case "terranova":
-        if ((dc + dr) % 2 === 0) this.drawMountain(g, x, y);
-        else if (dist === 1) this.drawShack(g, x, y);
-        break;
-
-      case "nexus":
-        if ((dc + dr) % 3 === 0) {
-          this.drawWarehouse(g, x, y);
-        } else if (dist === 2) {
-          this.drawHouse(g, x, y);
+        if ((dc + dr) % 3 === 0) this.drawVoxelTree(pos.x, pos.y);
+        else {
+          this.add.image(pos.x, pos.y, "farmland_block").setOrigin(0.5, 0).setDepth(pos.y / 100 + 0.5);
+          if ((dc * row) % 2 === 0) this.drawVoxelHouse(pos.x, pos.y);
         }
         break;
+      case "ignis_core":
+        if (dist <= 2) this.drawVoxelFactory(pos.x, pos.y, 2 + Math.abs(dc));
+        else this.add.image(pos.x, pos.y, "iron_block").setOrigin(0.5, 0).setDepth(pos.y / 100 + 0.1);
+        break;
+      case "terranova":
+        if ((dc + dr) % 2 === 0) this.drawVoxelMountain(pos.x, pos.y);
+        else if (dist === 1) this.drawVoxelOutpost(pos.x, pos.y);
+        break;
+      case "nexus":
+        if (dist <= 2) this.drawVoxelTradePost(pos.x, pos.y, (dc + dr) % 2 === 0);
+        break;
     }
   }
 
-  // ── Building renderers ────────────────────────────────────────────────────
-
-  private drawMountain(g: Phaser.GameObjects.Graphics, x: number, y: number) {
-    g.fillStyle(0x443333, 1);
-    g.fillTriangle(x - 16, y, x + 16, y, x, y - 30);
-    g.fillStyle(0x332222, 1);
-    g.fillTriangle(x - 4, y, x + 16, y, x, y - 30);
-    g.fillStyle(0xcccccc, 1); // snow peak
-    g.fillTriangle(x - 5, y - 20, x + 5, y - 20, x, y - 30);
+  private drawVoxelTree(x: number, y: number) {
+    this.add.image(x, y - 16, "log_block").setScale(0.5, 1).setOrigin(0.5, 0).setDepth(y / 100 + 1);
+    this.add.image(x, y - 32, "leaves_block").setOrigin(0.5, 0).setDepth(y / 100 + 2);
+    this.add.image(x, y - 44, "leaves_block").setScale(0.7).setOrigin(0.5, 0).setDepth(y / 100 + 3);
+  }
+  private drawVoxelHouse(x: number, y: number) {
+    this.add.image(x, y - 16, "cobblestone_block").setScale(0.7).setOrigin(0.5, 0).setDepth(y / 100 + 1);
+    this.add.image(x, y - 28, "log_block").setScale(0.8, 0.4).setOrigin(0.5, 0).setDepth(y / 100 + 2);
+  }
+  private drawVoxelFactory(x: number, y: number, height: number) {
+    for (let i = 1; i <= height; i++) this.add.image(x, y - i * 16, "iron_block").setOrigin(0.5, 0).setDepth(y / 100 + i);
+    const emitter = this.add.particles(x, y - height * 16, "smoke_particle", {
+      speed: 20, lifespan: 1000, frequency: 400, scale: { start: 0.5, end: 1.5 }, alpha: { start: 0.5, end: 0 }
+    }).setDepth(y / 100 + height + 1);
+    this.smokeEmitters.push(emitter);
+  }
+  private drawVoxelMountain(x: number, y: number) {
+    this.add.image(x, y - 16, "stone_block").setOrigin(0.5, 0).setDepth(y / 100 + 1);
+    this.add.image(x, y - 32, "stone_block").setScale(0.7).setOrigin(0.5, 0).setDepth(y / 100 + 2);
+  }
+  private drawVoxelOutpost(x: number, y: number) {
+    this.add.image(x, y - 16, "cobblestone_block").setOrigin(0.5, 0).setDepth(y / 100 + 1);
+    this.add.image(x - 8, y - 32, "cobblestone_block").setScale(0.4).setOrigin(0.5, 0).setDepth(y / 100 + 2);
+    this.add.image(x + 8, y - 32, "cobblestone_block").setScale(0.4).setOrigin(0.5, 0).setDepth(y / 100 + 2);
+  }
+  private drawVoxelMonument(x: number, y: number) {
+    this.add.image(x, y - 16, "prismarine_block").setOrigin(0.5, 0).setDepth(y / 100 + 1);
+    this.add.image(x, y - 24, "prismarine_block").setScale(0.6).setOrigin(0.5, 0).setDepth(y / 100 + 2);
+  }
+  private drawVoxelTradePost(x: number, y: number, golden: boolean) {
+    this.add.image(x, y - 16, "quartz_block").setOrigin(0.5, 0).setDepth(y / 100 + 1);
+    if (golden) this.add.image(x, y - 32, "gold_block").setScale(0.8).setOrigin(0.5, 0).setDepth(y / 100 + 2);
+    else this.add.image(x, y - 32, "quartz_block").setScale(0.8).setOrigin(0.5, 0).setDepth(y / 100 + 2);
   }
 
-  private drawSkyscraper(g: Phaser.GameObjects.Graphics, x: number, y: number, h: number) {
-    const bw = 20;
-    g.fillStyle(0x1a1a3a, 1);
-    g.fillRect(x - bw / 2 + bw, y - h, bw / 2, h);
-    g.fillStyle(0x222255, 1);
-    g.fillRect(x - bw / 2, y - h, bw, h);
-    g.fillStyle(0x333377, 1);
-    g.fillPoints([{ x: x - bw / 2, y: y - h }, { x: x + bw / 2 + bw / 2, y: y - h }, { x: x + bw, y: y - h + 6 }, { x: x - bw / 2 - 6, y: y - h + 6 }], true);
+  private setupPresidents() {
+    REGIONS.forEach((r) => {
+      const pos = toIso(r.centerCol, r.centerRow);
+      const container = this.add.container(pos.x, pos.y - 12);
 
-    const rows = Math.floor(h / 10);
-    for (let wr = 0; wr < rows; wr++) {
-      for (let wc = 0; wc < 3; wc++) {
-        const wx = x - bw / 2 + 3 + wc * 6;
-        const wy = y - h + 5 + wr * 10;
-        const color = Math.random() > 0.5 ? 0x00ffff : 0xff00ff;
-        const win = this.add.rectangle(wx, wy, 4, 5, color, 0.9).setDepth(3);
-        this.neonWindows.push(win);
-        this.tweens.add({ targets: win, alpha: Math.random() > 0.5 ? 0.1 : 0.9, duration: 400 + Math.random() * 800, yoyo: true, repeat: -1, delay: Math.random() * 1000 });
-      }
-    }
-    g.lineStyle(2, 0xff00ff, 1);
-    g.beginPath(); g.moveTo(x, y - h); g.lineTo(x, y - h - 12); g.strokePath();
-  }
+      const aura = this.add.circle(0, 0, 30, 0x0088ff, 0).setOrigin(0.5, 0.5);
+      container.add(aura);
 
-  private drawTree(g: Phaser.GameObjects.Graphics, x: number, y: number) {
-    g.fillStyle(0x5a3a1a, 1); g.fillRect(x - 3, y - 16, 6, 14);
-    g.fillStyle(0x116622, 1); g.fillTriangle(x - 14, y - 12, x + 14, y - 12, x, y - 36);
-    g.fillStyle(0x1a8833, 1); g.fillTriangle(x - 10, y - 22, x + 10, y - 22, x, y - 42);
-    g.fillStyle(0x22aa44, 1); g.fillTriangle(x - 7, y - 32, x + 7, y - 32, x, y - 48);
-  }
+      const body = this.add.image(0, 0, "log_block").setScale(0.3, 0.5).setOrigin(0.5, 0);
+      const head = this.add.image(0, -10, "quartz_block").setScale(0.2).setOrigin(0.5, 0);
+      container.add([body, head]);
+      container.setDepth(200);
+      const tag = this.add.text(0, -20, "HOLD", {
+        fontFamily: "'Press Start 2P', monospace", fontSize: "6px", color: "#ffffff", stroke: "#000000", strokeThickness: 2
+      }).setOrigin(0.5, 1);
+      container.add(tag);
 
-  private drawFarmTile(g: Phaser.GameObjects.Graphics, x: number, y: number) {
-    for (let row = 0; row < 3; row++) {
-      g.fillStyle(0x44aa22, 1); g.fillRect(x - 18 + row * 12, y - 6, 4, 14);
-      g.fillRect(x - 16 + row * 12, y - 10, 2, 6);
-    }
-  }
+      const bubbleContainer = this.add.container(pos.x, pos.y - 60).setDepth(250).setAlpha(0);
+      const bubbleBg = this.add.graphics();
+      bubbleBg.fillStyle(0xffffff, 0.9);
+      bubbleBg.lineStyle(2, 0x000000, 1);
+      bubbleBg.strokeRoundedRect(-50, -15, 100, 30, 4);
+      bubbleBg.fillRoundedRect(-50, -15, 100, 30, 4);
+      const bubbleText = this.add.text(0, 0, "", {
+        fontFamily: "'Press Start 2P', monospace", fontSize: "6px", color: "#000000", wordWrap: { width: 90 }, align: "center"
+      }).setOrigin(0.5, 0.5);
+      bubbleContainer.add([bubbleBg, bubbleText]);
 
-  private drawWindmill(x: number, y: number) {
-    const blade = this.add.graphics().setDepth(4);
-    blade.fillStyle(0xdddddd, 1);
-    blade.fillStyle(0x888888, 1);
-    blade.fillRect(x - 4, y - 40, 8, 40);
-
-    const bladeContainer = this.add.container(x, y - 42).setDepth(5);
-    const bladeGfx = this.add.graphics();
-    bladeGfx.fillStyle(0xeeeeee, 1);
-    bladeGfx.fillRect(-2, -18, 4, 36);
-    bladeGfx.fillRect(-18, -2, 36, 4);
-    bladeContainer.add(bladeGfx);
-    this.windmillBlades.push(bladeContainer);
-    this.tweens.add({ targets: bladeContainer, angle: 360, duration: 4000, repeat: -1, ease: "Linear" });
-  }
-
-  private drawBoat(g: Phaser.GameObjects.Graphics, x: number, y: number) {
-    g.fillStyle(0x8B6914, 1);
-    g.fillPoints([{ x: x - 14, y: y }, { x: x + 14, y: y }, { x: x + 10, y: y + 8 }, { x: x - 10, y: y + 8 }], true);
-    g.fillStyle(0xffeecc, 1); g.fillRect(x - 3, y - 14, 2, 14);
-    g.fillStyle(0xff4444, 0.8); g.fillTriangle(x - 1, y - 14, x + 10, y - 8, x - 1, y - 2);
-  }
-
-  private drawFactory(g: Phaser.GameObjects.Graphics, x: number, y: number) {
-    const bw = 32;
-    g.fillStyle(0x2a2010, 1); g.fillRect(x - bw / 2 + bw, y - 28, 12, 28);
-    g.fillStyle(0x3a3018, 1); g.fillRect(x - bw / 2, y - 28, bw, 28);
-    g.fillStyle(0x4a4020, 1); g.fillRect(x - bw / 2, y - 30, bw + 12, 4);
-
-    const stacks = [x - 10, x + 6];
-    stacks.forEach((sx) => {
-      g.fillStyle(0x333333, 1); g.fillRect(sx - 3, y - 50, 6, 22);
-      g.fillStyle(0x555555, 1); g.fillRect(sx - 4, y - 52, 8, 4);
-      this.addSmoke(sx, y - 54);
+      this.presidents.set(r.id, { regionId: r.id, container, tag, bubbleContainer, bubbleText, aura });
+      this.tweens.add({ targets: container, y: "-=5", duration: 1000 + Math.random() * 500, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
     });
-    g.fillStyle(0xffcc00, 0.9);
-    g.fillRect(x - 12, y - 22, 7, 7); g.fillRect(x + 4, y - 22, 7, 7);
   }
-
-  private drawWarehouse(g: Phaser.GameObjects.Graphics, x: number, y: number) {
-    g.fillStyle(0x2e2416, 1); g.fillRect(x - 20, y - 18, 40, 18);
-    g.fillStyle(0x3e3020, 1); g.fillEllipse(x, y - 18, 44, 14);
-    g.fillStyle(0xccaa44, 0.7); g.fillRect(x - 5, y - 16, 8, 16);
-  }
-
-  private drawShack(g: Phaser.GameObjects.Graphics, x: number, y: number) {
-    g.fillStyle(0x3a2010, 1); g.fillRect(x - 16, y - 18, 32, 18);
-    g.fillStyle(0x552a10, 1);
-    g.fillPoints([{ x: x - 18, y: y - 18 }, { x: x + 4, y: y - 18 }, { x: x + 14, y: y - 32 }, { x: x - 8, y: y - 30 }], true);
-    g.fillStyle(0x111111, 1); g.fillRect(x - 10, y - 14, 7, 7);
-    g.fillStyle(0x220a00, 1); g.fillRect(x + 4, y - 14, 6, 14);
-  }
-
-  private drawHouse(g: Phaser.GameObjects.Graphics, x: number, y: number) {
-    const bw = 28;
-    g.fillStyle(0x8b4513, 1); g.fillRect(x + bw / 2, y - 22, 10, 22);
-    g.fillStyle(0xd2691e, 1); g.fillRect(x - bw / 2, y - 22, bw, 22);
-    g.fillStyle(0x7a3010, 1);
-    g.fillPoints([{ x: x - bw / 2 - 2, y: y - 22 }, { x: x + bw / 2 + 12, y: y - 22 }, { x: x + 8, y: y - 38 }, { x: x - 4, y: y - 38 }], true);
-    g.fillStyle(0xffffaa, 0.9); g.fillRect(x - 12, y - 18, 7, 6); g.fillRect(x + 4, y - 18, 7, 6);
-    g.fillStyle(0x5a2a00, 1); g.fillRect(x - 4, y - 12, 8, 12);
-  }
-
-  private addSmoke(x: number, y: number) {
-    if (!this.textures.exists("smoke_particle")) {
-      const sg = this.make.graphics({ x: 0, y: 0 });
-      sg.fillStyle(0xaaaaaa, 0.6); sg.fillCircle(4, 4, 4);
-      sg.generateTexture("smoke_particle", 8, 8); sg.destroy();
-    }
-    const emitter = this.add.particles(x, y, "smoke_particle", {
-      speed: { min: 10, max: 25 }, angle: { min: 250, max: 290 }, scale: { start: 0.3, end: 1.2 },
-      alpha: { start: 0.7, end: 0 }, lifespan: 2000, frequency: 300, quantity: 1, tint: [0x888888, 0xaaaaaa, 0x999966],
-    });
-    emitter.setDepth(20); this.smokeEmitters.push(emitter);
-  }
-
-  // ── Animated elements ─────────────────────────────────────────────────────
-
-  private addAnimatedElements() {
-    const waterRegion = REGIONS.find((r) => r.id === "aquilonia")!;
-    for (let i = 0; i < 4; i++) {
-      const { x, y } = toIso(
-        waterRegion.centerCol + Phaser.Math.Between(-1, 1),
-        waterRegion.centerRow + Phaser.Math.Between(-1, 1)
-      );
-      const ripple = this.add.ellipse(x, y + 8, 20, 8, 0x66ccff, 0.3).setDepth(6);
-      this.waterRipples.push(ripple);
-      this.tweens.add({ targets: ripple, scaleX: 2.5, scaleY: 2.5, alpha: 0, duration: 2000, delay: i * 600, repeat: -1, ease: "Sine.easeOut" });
-    }
-  }
-
-  // ── Labels ────────────────────────────────────────────────────────────────
 
   private drawRegionLabels() {
     REGIONS.forEach((r) => {
@@ -409,162 +329,190 @@ export default class GameScene extends Phaser.Scene {
       this.add.text(x, y - 20, r.label, {
         fontFamily: "'Press Start 2P', monospace", fontSize: "7px",
         color: "#" + r.borderColor.toString(16).padStart(6, "0"),
-        stroke: "#000000", strokeThickness: 3, shadow: { offsetX: 1, offsetY: 1, color: "#000000", blur: 4, fill: true },
-      }).setOrigin(0.5, 1).setDepth(110);
-      this.add.text(x, y - 10, r.zone, {
-        fontFamily: "'Press Start 2P', monospace", fontSize: "5px", color: "#aaaaaa",
-      }).setOrigin(0.5, 1).setDepth(110);
+        stroke: "#000000", strokeThickness: 3
+      }).setOrigin(0.5, 1).setDepth(210);
     });
   }
-
-  // ── Hexagonal-style borders between regions ───────────────────────────────
-
-  private drawHexagonBorders() {
-    const g = this.uiLayer;
-    g.lineStyle(2, 0xffffff, 0.5);
-
-    const pairs: [number, number][] = [
-      [0, 1], [0, 2], [0, 3], [0, 4], [1, 3], [2, 4],
-    ];
-
-    pairs.forEach(([ai, bi]) => {
-      const ra = REGIONS[ai];
-      const rb = REGIONS[bi];
-      const a = toIso(ra.centerCol, ra.centerRow);
-      const b = toIso(rb.centerCol, rb.centerRow);
-
-      const steps = 20;
-      for (let s = 0; s < steps; s++) {
-        if (s % 2 === 0) {
-          const t0 = s / steps;
-          const t1 = (s + 0.6) / steps;
-          g.beginPath();
-          g.moveTo(a.x + (b.x - a.x) * t0, a.y + (b.y - a.y) * t0);
-          g.lineTo(a.x + (b.x - a.x) * t1, a.y + (b.y - a.y) * t1);
-          g.strokePath();
-        }
-      }
-    });
-
-    REGIONS.forEach((r) => {
-      const { x, y } = toIso(r.centerCol, r.centerRow);
-      const pts: { x: number; y: number }[] = [];
-      const rad = r.radius * TILE_W * 0.58;
-      for (let i = 0; i < 6; i++) {
-        const angle = (Math.PI / 3) * i - Math.PI / 6;
-        pts.push({ x: x + rad * Math.cos(angle), y: y + rad * Math.sin(angle) * 0.5 });
-      }
-      g.lineStyle(2, r.borderColor, 0.75);
-      g.strokePoints(pts, true);
-    });
-  }
-
-  // ── Single President per Region ───────────────────────────────────────────
-
-  private setupPresidents() {
-    REGIONS.forEach((r) => {
-      const { x, y } = toIso(r.centerCol, r.centerRow);
-
-      // A slightly larger entity
-      const body = this.add.rectangle(x, y - 5, 8, 12, r.borderColor, 1).setDepth(40);
-      const head = this.add.rectangle(x, y - 15, 6, 6, 0xffddaa, 1).setDepth(40);
-
-      // Floating text for current action
-      const tag = this.add.text(x, y - 25, "HOLD", {
-        fontFamily: "'Press Start 2P', monospace",
-        fontSize: "6px",
-        color: "#ffffff",
-        stroke: "#000000",
-        strokeThickness: 2,
-      }).setOrigin(0.5, 1).setDepth(45);
-
-      this.presidents.set(r.id, { regionId: r.id, body, head, tag });
-
-      // Idle animation
-      this.tweens.add({
-        targets: [body, head, tag],
-        y: "-=3",
-        duration: 1500,
-        yoyo: true,
-        repeat: -1,
-        ease: "Sine.easeInOut",
-        delay: Math.random() * 1000,
-      });
-    });
-  }
-
-  // ── Legend ────────────────────────────────────────────────────────────────
 
   private drawLegend() {
-    const items = [
-      { label: "0=HOLD", color: "#aaaaaa" },
-      { label: "1=TRADE", color: "#44aaff" },
-      { label: "2=EXPAND", color: "#44ff88" },
-      { label: "3=STEAL", color: "#ff4444" },
-    ];
-    const legendX = 12;
-    const legendY = 68;
-
-    this.add.rectangle(legendX + 80, legendY + items.length * 12 + 4, 162, items.length * 22 + 16, 0x000000, 0.65)
-      .setDepth(200)
-      .setOrigin(0.5, 0);
-
+    const items = [{ label: "0=HOLD", color: "#aaaaaa" }, { label: "1=TRADE", color: "#44aaff" }, { label: "2=EXPAND", color: "#44ff88" }, { label: "3=STEAL", color: "#ff4444" }];
+    this.add.rectangle(100, 150, 160, 100, 0x000000, 0.6).setDepth(200).setOrigin(0.5);
     items.forEach((item, i) => {
-      this.add.text(legendX + 8, legendY + i * 22 + 10, item.label, {
-        fontFamily: "'Press Start 2P', monospace",
-        fontSize: "6px",
-        color: item.color,
-      }).setDepth(201);
+      this.add.text(30, 110 + i * 20, item.label, { fontFamily: "'Press Start 2P', monospace", fontSize: "8px", color: item.color }).setDepth(201);
     });
   }
 
-  // ── React → Phaser state update ───────────────────────────────────────────
-
   updateWorldState(worldState: WorldState) {
-
-    // 1. Update President Action Tags
-    Object.entries(worldState.agents).forEach(([_, agent]) => {
+    Object.values(worldState.agents).forEach((agent) => {
       const pres = this.presidents.get(agent.region_id);
       if (pres) {
         pres.tag.setText(ACTION_LABELS[agent.action] || "HOLD");
         pres.tag.setColor(Phaser.Display.Color.IntegerToColor(ACTION_COLORS[agent.action] || 0xaaaaaa).rgba);
+
+        // Aura
+        if (agent.action === 0) { // HOLD
+          if (pres.aura.alpha === 0) {
+            pres.aura.setAlpha(0.5);
+            this.tweens.add({ targets: pres.aura, scale: 2, alpha: 0, duration: 2000, repeat: -1 });
+          }
+        } else {
+          pres.aura.setAlpha(0);
+          this.tweens.killTweensOf(pres.aura);
+          pres.aura.setScale(1);
+        }
+
+        if (agent.action === 3) { if (!this.tweens.isTweening(pres.container)) this.tweens.add({ targets: pres.container, scale: 1.5, duration: 100, yoyo: true, repeat: 3 }); }
       }
     });
 
-    // 2. Weather Engine execution (Tinting and Particles)
+    if (this.actionBeams) {
+      this.actionBeams.clear();
+    }
+
     Object.entries(worldState.regions).forEach(([regionId, regionState]) => {
+      const pres = this.presidents.get(regionId);
+      if (pres) {
+        if (regionState.speech_bubble) {
+          pres.bubbleText.setText(regionState.speech_bubble.substring(0, 40));
+          pres.bubbleContainer.setAlpha(1);
+          this.tweens.add({
+            targets: pres.bubbleContainer,
+            alpha: 0,
+            duration: 500,
+            delay: 2500
+          });
+        }
+      }
 
+      if (regionState.target_beams && this.actionBeams) {
+        const sDef = REGIONS.find(r => r.id === regionId);
+        if (sDef) {
+          const sPos = toIso(sDef.centerCol, sDef.centerRow);
+          regionState.target_beams.forEach((beam: any) => {
+            const tDef = REGIONS.find(r => r.id === beam.target);
+            if (tDef) {
+              const tPos = toIso(tDef.centerCol, tDef.centerRow);
+              const color = beam.type === 'trade' ? 0xffdd00 : 0xff0000;
+              this.actionBeams!.lineStyle(4, color, 0.8);
+              this.actionBeams!.beginPath();
+              this.actionBeams!.moveTo(sPos.x, sPos.y - 12);
+
+              const midX = (sPos.x + tPos.x) / 2;
+              const midY = (sPos.y + tPos.y) / 2 - 50;
+
+              this.actionBeams!.quadraticCurveTo(midX, midY, tPos.x, tPos.y - 12);
+              this.actionBeams!.strokePath();
+
+              if (!beam.success) {
+                this.actionBeams!.lineStyle(2, 0xffaa00, 1);
+                this.actionBeams!.beginPath();
+                this.actionBeams!.moveTo(tPos.x - 10, tPos.y - 20);
+                this.actionBeams!.lineTo(tPos.x + 10, tPos.y);
+                this.actionBeams!.moveTo(tPos.x + 10, tPos.y - 20);
+                this.actionBeams!.lineTo(tPos.x - 10, tPos.y);
+                this.actionBeams!.strokePath();
+              }
+            }
+          });
+        }
+      }
+      const rain = this.rainEmitters.get(regionId);
+      const blight = this.blightEmitters.get(regionId);
       const weatherOverlay = this.weatherOverlays.get(regionId);
-      const rainEmitter = this.rainEmitters.get(regionId);
+      const crimeOverlay = this.crimeOverlays.get(regionId);
+      const blocks = this.groundBlocks.get(regionId);
+      const rDef = REGIONS.find(r => r.id === regionId);
 
-      if (regionState.active_weather === "drought") {
-        // Yellow/brown tint mapped onto the overlay
-        if (weatherOverlay) {
-          this.tweens.add({ targets: weatherOverlay, alpha: 0.4, duration: 2000 });
+      // Resource utilisation bars (W/F/E/L)
+      const bars = this.resourceBars.get(regionId);
+      if (bars) {
+        const { water, food, energy, land } = regionState.resources;
+        const maxVal = 300;
+        const clampRatio = (v: number) => Phaser.Math.Clamp(v / maxVal, 0, 1);
+        const maxHeight = 22;
+
+        const setBar = (bar: Phaser.GameObjects.Rectangle, value: number) => {
+          const ratio = clampRatio(value);
+          const h = Math.max(2, maxHeight * ratio);
+          bar.height = h;
+        };
+
+        const prev = this.lastResources.get(regionId);
+
+        setBar(bars.water, water);
+        setBar(bars.food, food);
+        setBar(bars.energy, energy);
+        setBar(bars.land, land);
+
+        // Consumption pulse: flash the bar when that resource drops noticeably
+        const maybePulse = (bar: Phaser.GameObjects.Rectangle, delta: number) => {
+          if (delta < -1 && !this.tweens.isTweening(bar)) {
+            this.tweens.add({
+              targets: bar,
+              alpha: { from: 1, to: 0.3 },
+              duration: 120,
+              yoyo: true,
+              repeat: 1,
+            });
+          }
+        };
+
+        if (prev) {
+          maybePulse(bars.water, water - prev.water);
+          maybePulse(bars.food, food - prev.food);
+          maybePulse(bars.energy, energy - prev.energy);
+          maybePulse(bars.land, land - prev.land);
         }
-      } else {
-        if (weatherOverlay) {
-          this.tweens.add({ targets: weatherOverlay, alpha: 0, duration: 1000 });
-        }
+
+        this.lastResources.set(regionId, { water, food, energy, land });
       }
 
-      if (regionState.active_weather === "rain") {
-        if (rainEmitter && !rainEmitter.on) {
-          rainEmitter.start();
-        }
-      } else {
-        if (rainEmitter && rainEmitter.on) {
-          rainEmitter.stop();
-        }
+      if (rain) rain.emitting = regionState.active_weather === "rain";
+      if (blight) blight.emitting = regionState.active_weather === "blight";
+
+      if (blocks && rDef) {
+        let t = rDef.baseBlock;
+        if (regionState.active_weather === "drought" && (rDef.baseBlock === "grass_block" || rDef.baseBlock === "water_block")) t = "sand_block";
+        else if (regionState.active_weather === "blight" && rDef.id === "verdantis") t = "mycelium_block";
+        blocks.forEach(b => { if (b.texture.key !== t) b.setTexture(t); });
       }
 
-      // Base morale/crime pulse
-      const overlay = this.crimeOverlays.get(regionId);
-      if (overlay) {
-        // Low morale = high crime tint (red)
-        const crimeAlpha = Math.max(0, (1.0 - regionState.morale) * 0.4);
-        this.tweens.add({ targets: overlay, alpha: crimeAlpha, duration: 1000 });
+      if (weatherOverlay) {
+        if (regionState.active_weather === "drought") weatherOverlay.setAlpha(0.2);
+        else if (regionState.active_weather === "solar_flare") weatherOverlay.setFillStyle(0xffff00, 0.3).setAlpha(0.3);
+        else weatherOverlay.setAlpha(0);
+      }
+
+      if (crimeOverlay) {
+        const crimeAlpha = Math.max(0, (1.0 - regionState.morale) * 0.5);
+        if (crimeAlpha > 0.3) {
+          crimeOverlay.setAlpha(crimeAlpha);
+          if (!this.tweens.isTweening(crimeOverlay)) this.tweens.add({ targets: crimeOverlay, alpha: crimeAlpha * 0.5, duration: 500, yoyo: true, repeat: -1 });
+        } else { crimeOverlay.setAlpha(0); this.tweens.killTweensOf(crimeOverlay); }
       }
     });
+
+    if (this.tradeBeams) {
+      this.tradeBeams.clear();
+      Object.entries(worldState.trade_network).forEach(([sourceId, partners]: [string, any]) => {
+        const agent = Object.values(worldState.agents).find(a => a.region_id === sourceId);
+        if (agent && agent.action === 1 && partners.length > 0) {
+          const sDef = REGIONS.find(r => r.id === sourceId);
+          if (!sDef) return;
+          const sPos = toIso(sDef.centerCol, sDef.centerRow);
+          partners.forEach((targetId: string) => {
+            const tDef = REGIONS.find(r => r.id === targetId);
+            if (!tDef) return;
+            const tPos = toIso(tDef.centerCol, tDef.centerRow);
+            if (this.time.now % 100 < 5) {
+              const cart = this.add.container(sPos.x, sPos.y).setDepth(160);
+              const box = this.add.image(0, 0, "log_block").setScale(0.2).setOrigin(0.5);
+              cart.add(box);
+              this.tweens.add({ targets: cart, x: tPos.x, y: tPos.y, duration: 2000, onComplete: () => cart.destroy() });
+            }
+          });
+        }
+      });
+    }
   }
 }

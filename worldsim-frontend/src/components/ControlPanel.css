@@ -1,310 +1,242 @@
-/* ─── Control Panel ────────────────────────────────────────── */
+/* ─── Minecraft / Voxel UI Overhaul ────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=VT323&family=Press+Start+2P&display=swap');
+
 .control-panel {
-  width: 260px;
-  background: linear-gradient(180deg, #08081a 0%, #0a0a20 100%);
-  border-left: 3px solid #00ffff;
-  border-top: 3px solid #00ffff;
-  padding: 12px;
+  width: 280px;
+  background-color: #c6c6c6;
+  /* Classic Minecraft UI Grey */
+  border: 4px solid #373737;
+  border-left: 4px solid #ffffff;
+  border-top: 4px solid #ffffff;
+  padding: 16px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   flex-shrink: 0;
+  box-shadow: inset -4px -4px 0px #555555;
+  image-rendering: pixelated;
 }
 
 .panel-section {
-  background: rgba(0, 255, 255, 0.04);
-  padding: 10px;
-  border: 1px solid rgba(0, 255, 255, 0.15);
-  border-left: 3px solid rgba(0, 255, 255, 0.5);
+  background: #9b9b9b;
+  padding: 12px;
+  border: 3px solid #373737;
+  box-shadow: inset -3px -3px 0px #555555, inset 3px 3px 0px #ffffff;
   position: relative;
+  margin-bottom: 4px;
 }
 
 .panel-section h3 {
-  font-family: 'Press Start 2P', monospace;
-  font-size: 6px;
+  font-family: 'VT323', monospace;
+  font-size: 18px;
   font-weight: 400;
-  color: #00ffff;
-  margin: 0 0 10px 0;
+  color: #373737;
+  margin: 0 0 12px 0;
   text-transform: uppercase;
   letter-spacing: 1px;
-  text-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
+  border-bottom: 2px solid #555555;
+  display: inline-block;
 }
 
-/* ─── Buttons ──────────────────────────────────────────────── */
+/* ─── Buttons (Minecraft Style) ────────────────────────────── */
 .button-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .btn {
-  padding: 8px 12px;
-  border: 2px solid;
-  font-family: 'Press Start 2P', monospace;
-  font-size: 7px;
+  padding: 10px 14px;
+  border: 4px solid #000000;
+  font-family: 'VT323', monospace;
+  font-size: 16px;
   cursor: pointer;
-  transition: all 0.1s;
+  transition: transform 0.05s;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
   position: relative;
   outline: none;
+  background-color: #7a7a7a;
+  color: #ffffff;
+  box-shadow: inset -4px -4px 0px #373737;
 }
 
-.btn::after {
-  content: '';
-  position: absolute;
-  bottom: -3px;
-  right: -3px;
-  width: 100%;
-  height: 100%;
-  background: currentColor;
-  opacity: 0.2;
-  z-index: -1;
+.btn:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: inset 4px 4px 0px #373737;
 }
 
 .btn-primary {
-  background: #001a22;
-  border-color: #00ffff;
-  color: #00ffff;
-  box-shadow: 0 0 8px rgba(0, 255, 255, 0.3);
+  background-color: #5555ff;
+  /* Blue variant */
+  border-color: #000000;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #00ffff;
-  color: #000;
-  box-shadow: 0 0 20px rgba(0, 255, 255, 0.8);
+  background-color: #7777ff;
 }
 
 .btn-secondary {
-  background: #001022;
-  border-color: #4a9eff;
-  color: #4a9eff;
-  box-shadow: 0 0 8px rgba(74, 158, 255, 0.2);
+  background-color: #7a7a7a;
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #4a9eff;
-  color: #000;
-  box-shadow: 0 0 20px rgba(74, 158, 255, 0.7);
+  background-color: #999999;
 }
 
 .btn-danger {
-  background: #1a0000;
-  border-color: #ff4444;
-  color: #ff4444;
-  box-shadow: 0 0 8px rgba(255, 68, 68, 0.2);
+  background-color: #ff5555;
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #ff4444;
-  color: #000;
-  box-shadow: 0 0 20px rgba(255, 68, 68, 0.7);
+  background-color: #ff7777;
 }
 
 .btn:disabled {
-  opacity: 0.35;
+  background-color: #373737;
+  color: #7a7a7a;
   cursor: not-allowed;
+  opacity: 1;
 }
 
-/* ─── Stats ─────────────────────────────────────────────────── */
+/* ─── Stats (Blocky look) ───────────────────────────────────── */
 .stats {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .stat-item {
   display: flex;
   justify-content: space-between;
-  font-size: 14px;
-  padding: 4px 0;
-  border-bottom: 1px solid rgba(0, 255, 255, 0.08);
+  font-family: 'VT323', monospace;
+  font-size: 16px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 2px solid #555555;
 }
 
 .stat-label {
-  color: #667788;
+  color: #373737;
 }
 
 .stat-value {
-  color: #00ffdd;
-  font-family: 'Press Start 2P', monospace;
-  font-size: 7px;
+  color: #ffffff;
+  text-shadow: 2px 2px 0px #000000;
+}
+
+.weather-value {
+  color: #ffff55;
+  /* Goldish for weather */
 }
 
 /* ─── Events Log ────────────────────────────────────────────── */
 .events-log {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 100px;
+  gap: 6px;
+  max-height: 120px;
   overflow-y: auto;
+  background: #373737;
+  padding: 6px;
+  border: 3px solid #000000;
 }
 
 .event-item {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
-  padding: 4px 6px;
-  background: rgba(255, 68, 68, 0.06);
-  border-left: 2px solid #ff4444;
+  font-family: 'VT323', monospace;
+  font-size: 14px;
+  padding: 4px;
+  border-bottom: 1px solid #555555;
 }
 
 .event-type {
-  color: #ff6666;
-  font-size: 11px;
+  color: #ff5555;
 }
 
 .event-region {
-  color: #667788;
-  font-size: 10px;
-}
-
-.no-events {
-  color: #334455;
-  font-size: 12px;
-  text-align: center;
-  padding: 6px 0;
-  margin: 0;
+  color: #aaaaaa;
 }
 
 /* ─── Zone Legend ───────────────────────────────────────────── */
 .legend {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: 10px;
+  font-family: 'VT323', monospace;
+  font-size: 16px;
+  color: #373737;
 }
 
 .color-box {
-  width: 14px;
-  height: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  flex-shrink: 0;
-  position: relative;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #000000;
+  box-shadow: inset -3px -3px 0px rgba(0, 0, 0, 0.3);
 }
 
 .color-box.blue {
-  background: #4499ff;
-  box-shadow: 0 0 5px #4499ff;
+  background: #5555ff;
 }
 
 .color-box.green {
-  background: #44cc22;
-  box-shadow: 0 0 5px #44cc22;
+  background: #55ff55;
 }
 
 .color-box.orange {
-  background: #ffcc00;
-  box-shadow: 0 0 5px #ffcc00;
+  background: #ffaa00;
 }
 
 .color-box.brown {
-  background: #cc6622;
-  box-shadow: 0 0 5px #cc6622;
+  background: #aa5500;
 }
 
 .color-box.silver {
-  background: #cccccc;
-  box-shadow: 0 0 5px #cccccc;
-}
-
-/* ─── Tribe section ─────────────────────────────────────────── */
-.tribes-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.tribe-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.tribe-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  animation: tribePulse 2s ease-in-out infinite;
-}
-
-.tribe-dot.energy {
-  background: #ff3333;
-  box-shadow: 0 0 6px #ff3333;
-}
-
-.tribe-dot.water {
-  background: #3399ff;
-  box-shadow: 0 0 6px #3399ff;
-  animation-delay: 0.5s;
-}
-
-.tribe-dot.food {
-  background: #ffcc00;
-  box-shadow: 0 0 6px #ffcc00;
-  animation-delay: 1s;
-}
-
-@keyframes tribePulse {
-
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.4;
-  }
+  background: #ffffff;
 }
 
 /* ─── Crime alert ───────────────────────────────────────────── */
 .crime-alert {
-  background: rgba(255, 0, 0, 0.1);
-  border: 2px solid #ff2222;
-  padding: 6px 8px;
-  font-size: 11px;
-  color: #ff4444;
+  background: #ff5555;
+  border: 4px solid #000000;
+  padding: 10px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 10px;
+  color: #ffffff;
+  text-shadow: 2px 2px 0px #370000;
   text-align: center;
-  animation: crimeAlertBlink 1s step-end infinite;
   display: none;
+  animation: voxelBlink 0.5s step-start infinite;
 }
 
 .crime-alert.active {
   display: block;
 }
 
-@keyframes crimeAlertBlink {
-
-  0%,
-  100% {
-    opacity: 1;
-    border-color: #ff2222;
-  }
-
+@keyframes voxelBlink {
   50% {
     opacity: 0.5;
-    border-color: #880000;
+    background: #370000;
   }
 }
 
 /* ─── Scrollbar ─────────────────────────────────────────────── */
 .events-log::-webkit-scrollbar {
-  width: 3px;
+  width: 8px;
 }
 
 .events-log::-webkit-scrollbar-track {
-  background: transparent;
+  background: #1e1e1e;
 }
 
 .events-log::-webkit-scrollbar-thumb {
-  background: rgba(0, 255, 255, 0.3);
+  background: #7a7a7a;
+  border: 2px solid #373737;
 }

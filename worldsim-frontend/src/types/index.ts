@@ -26,6 +26,12 @@ export interface RegionState {
   energy_demand: number;
   energy_production: number;
   population: number;
+  // optional analytics fields from backend
+  total_exports?: number;
+  resources_stolen?: number;
+  energy_defense?: number;
+  speech_bubble: string;
+  target_beams: { target: string; type: "trade" | "steal"; success?: boolean }[];
 }
 
 // ─── President agent ──────────────────────────────────────────────────────────
@@ -43,6 +49,7 @@ export interface PresidentAgent {
   resources_held: number;
   hunger: number;
   fear: number;
+  speech_bubble: string;
 }
 
 // ─── World state ──────────────────────────────────────────────────────────────
@@ -54,6 +61,15 @@ export interface WorldState {
   trade_network: Record<string, string[]>;
   active_weather: string;
   weather_region: string;
+  // Analytics / "Viva" outputs
+  trade_network_stats?: Record<string, { partner: string; trades: number }[]>;
+  conflict_cycles?: { step: number; avg_crime: number; conflicts: number }[];
+  sustainability?: {
+    leader: string | null;
+    collapse_steps: Record<string, number | null>;
+  };
+  climate_heat?: number;
+  analysis_reports?: any[];
 }
 
 // ─── Climate event ────────────────────────────────────────────────────────────

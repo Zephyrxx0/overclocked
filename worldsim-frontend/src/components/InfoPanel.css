@@ -1,15 +1,20 @@
-/* ─── Info Panel ─────────────────────────────────────────────── */
+/* ─── Info Panel (Minecraft / Voxel UI) ───────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=VT323&family=Press+Start+2P&display=swap');
+
 .info-panel {
-  width: 240px;
-  background: linear-gradient(180deg, #08081a 0%, #060614 100%);
-  border: 2px solid rgba(0, 255, 255, 0.25);
-  border-top: 3px solid rgba(0, 255, 255, 0.5);
-  padding: 10px;
+  width: 260px;
+  background-color: #c6c6c6;
+  border: 4px solid #373737;
+  border-left: 4px solid #ffffff;
+  border-top: 4px solid #ffffff;
+  padding: 16px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   flex-shrink: 0;
+  box-shadow: inset -4px -4px 0px #555555;
+  image-rendering: pixelated;
 }
 
 .no-data {
@@ -17,8 +22,9 @@
   justify-content: center;
   align-items: center;
   height: 100%;
-  color: #334455;
-  font-size: 13px;
+  color: #373737;
+  font-family: 'VT323', monospace;
+  font-size: 18px;
   text-align: center;
   padding: 20px;
 }
@@ -26,15 +32,15 @@
 .regions-grid {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 /* ─── Region cards ───────────────────────────────────────────── */
 .region-card {
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 8px;
-  transition: border-color 0.2s;
+  background: #9b9b9b;
+  border: 3px solid #373737;
+  box-shadow: inset -3px -3px 0px #555555, inset 3px 3px 0px #ffffff;
+  padding: 10px;
   position: relative;
   overflow: hidden;
 }
@@ -45,36 +51,27 @@
   left: 0;
   top: 0;
   bottom: 0;
-  width: 3px;
+  width: 4px;
 }
 
 .region-card[data-region="blue"]::before {
-  background: #4499ff;
-  box-shadow: 0 0 8px #4499ff;
+  background: #5555ff;
 }
 
 .region-card[data-region="green"]::before {
-  background: #44cc22;
-  box-shadow: 0 0 8px #44cc22;
+  background: #55ff55;
 }
 
 .region-card[data-region="orange"]::before {
-  background: #ffcc00;
-  box-shadow: 0 0 8px #ffcc00;
+  background: #ffaa00;
 }
 
 .region-card[data-region="brown"]::before {
-  background: #cc6622;
-  box-shadow: 0 0 8px #cc6622;
+  background: #aa5500;
 }
 
 .region-card[data-region="silver"]::before {
-  background: #cccccc;
-  box-shadow: 0 0 8px #cccccc;
-}
-
-.region-card:hover {
-  border-color: rgba(0, 255, 255, 0.3);
+  background: #ffffff;
 }
 
 .region-header {
@@ -82,185 +79,164 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
-  padding-left: 6px;
-}
-
-.region-name-wrap {
-  display: flex;
-  align-items: flex-start;
-  gap: 5px;
 }
 
 .region-header h4 {
-  margin: 0 0 2px 0;
+  margin: 0;
   font-family: 'Press Start 2P', monospace;
-  font-size: 5px;
-  color: #ccffee;
+  font-size: 8px;
+  color: #373737;
   text-transform: uppercase;
 }
 
 .region-lore {
-  font-size: 9px;
-  color: #8899aa;
-  font-style: italic;
+  font-family: 'VT323', monospace;
+  font-size: 14px;
+  color: #555555;
 }
 
-.zone-emoji {
-  font-size: 12px;
-  margin-top: -2px;
-}
-
-/* ─── Resource bars ──────────────────────────────────────────── */
+/* ─── Resource bars (Inventory-style) ───────────────────────── */
 .resources-bars {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 6px;
-  padding-left: 6px;
+  margin-bottom: 8px;
+  background: rgba(0, 0, 0, 0.1);
+  padding: 6px;
+  border: 2px solid #555555;
 }
 
 .resource-bar {
   display: grid;
-  grid-template-columns: 36px 1fr 28px;
+  grid-template-columns: 45px 1fr 30px;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
+  gap: 8px;
+  font-family: 'VT323', monospace;
+  font-size: 14px;
 }
 
 .resource-bar label {
-  color: #556677;
-  font-size: 11px;
+  color: #373737;
 }
 
 .bar-container {
-  height: 8px;
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  overflow: hidden;
+  height: 10px;
+  background: #373737;
+  border: 2px solid #000000;
   position: relative;
 }
 
 .bar-fill {
   height: 100%;
-  transition: width 0.5s ease;
-  position: relative;
-}
-
-/* Animated tip glow */
-.bar-fill::after {
-  content: '';
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: white;
-  opacity: 0.6;
-  filter: blur(1px);
+  transition: width 0.5s step-end;
+  /* Snappy voxel feel */
 }
 
 .bar-fill.water {
-  background: linear-gradient(90deg, #004488 0%, #0099ff 100%);
+  background: #5555ff;
 }
 
 .bar-fill.food {
-  background: linear-gradient(90deg, #004400 0%, #00cc44 100%);
+  background: #55ff55;
 }
 
 .bar-fill.energy {
-  background: linear-gradient(90deg, #443300 0%, #ffcc00 100%);
+  background: #ffff55;
 }
 
 .bar-fill.land {
-  background: linear-gradient(90deg, #3a2a10 0%, #8b6f47 100%);
+  background: #aa5500;
 }
 
 .value {
-  color: #aabbcc;
-  font-size: 10px;
+  color: #ffffff;
+  font-size: 14px;
   text-align: right;
-  font-family: 'Press Start 2P', monospace;
+  text-shadow: 1px 1px 0px #000000;
 }
 
 /* ─── Region stats ───────────────────────────────────────────── */
 .region-stats {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 5px 0 5px 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  margin-bottom: 6px;
+  gap: 4px;
+  background: #373737;
+  padding: 8px;
+  border: 2px solid #000000;
+  margin-bottom: 8px;
 }
 
 .stat {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  font-family: 'VT323', monospace;
+  font-size: 14px;
 }
 
 .stat span {
-  color: #556677;
+  color: #aaaaaa;
 }
 
 .stat strong {
-  color: #00ddbb;
-  font-family: 'Press Start 2P', monospace;
-  font-size: 7px;
+  color: #ffffff;
+  font-weight: 400;
 }
 
 .stat strong.positive {
-  color: #00ff44;
+  color: #55ff55;
 }
 
 .stat strong.negative {
-  color: #ff4444;
+  color: #ff5555;
 }
 
-/* ─── President RL Action ───────────────────────────────────── */
+/* ─── RL Action Badge ──────────────────────────────────────── */
 .presidential-action {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-left: 6px;
   margin-top: 4px;
 }
 
 .tribe-badge {
-  padding: 3px 5px;
-  border: 1px solid;
-  font-family: 'Press Start 2P', monospace;
-  font-size: 5px;
+  padding: 4px 8px;
+  border: 2px solid #000000;
+  font-family: 'VT323', monospace;
+  font-size: 14px;
   text-transform: uppercase;
+  background: #7a7a7a;
+  color: #ffffff;
+  box-shadow: inset -2px -2px 0px #373737;
 }
 
 .pres-reward {
   font-family: 'Press Start 2P', monospace;
-  font-size: 6px;
-  color: #ffff00;
-  text-shadow: 0 0 4px #aa8800;
+  font-size: 7px;
+  color: #ffff55;
+  text-shadow: 2px 2px 0px #370000;
 }
 
 /* ─── Panel header ───────────────────────────────────────────── */
 .info-panel-header {
   font-family: 'Press Start 2P', monospace;
-  font-size: 6px;
-  color: #00ffcc;
+  font-size: 10px;
+  color: #373737;
   text-align: center;
-  padding: 4px 0 8px;
-  border-bottom: 1px solid rgba(0, 255, 204, 0.2);
-  text-shadow: 0 0 8px rgba(0, 255, 204, 0.5);
+  padding: 8px 0;
+  border-bottom: 3px solid #555555;
+  margin-bottom: 12px;
 }
 
 /* ─── Scrollbar ──────────────────────────────────────────────── */
 .info-panel::-webkit-scrollbar {
-  width: 3px;
+  width: 8px;
 }
 
 .info-panel::-webkit-scrollbar-track {
-  background: transparent;
+  background: #1e1e1e;
 }
 
 .info-panel::-webkit-scrollbar-thumb {
-  background: rgba(0, 255, 204, 0.3);
+  background: #7a7a7a;
+  border: 2px solid #373737;
 }
