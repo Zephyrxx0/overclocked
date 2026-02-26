@@ -1,8 +1,8 @@
 """
-main.py  –  WorldSim FastAPI backend (FastAPI 0.133 / uvicorn 0.41)
---------------------------------------------------------------------
-Uses the modern `lifespan` context manager instead of deprecated
-@app.on_event("startup") / @app.on_event("shutdown") handlers.
+main.py  –  WorldSim 2.0 FastAPI backend (FastAPI 0.133 / uvicorn 0.41)
+-----------------------------------------------------------------------
+WebSocket broadcasts world-state at 2 Hz.
+Endpoint: /ws/world-state  (also aliased as /ws for backward compat)
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ _is_running: bool = True
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Broadcaster coroutine (drains queue → fans out to all WS clients)
+# Broadcaster
 # ──────────────────────────────────────────────────────────────────────────────
 
 async def broadcaster() -> None:
@@ -51,7 +51,7 @@ async def broadcaster() -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Lifespan (FastAPI 0.93+ recommended approach)
+# Lifespan
 # ──────────────────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_running_loop()
     start_simulation(_state_queue, loop)
     task = asyncio.create_task(broadcaster(), name="broadcaster")
-    logger.info("WorldSim backend started — simulation running.")
+    logger.info("WorldSim 2.0 backend started — 5 sovereign nations running.")
     yield
     stop_simulation()
     task.cancel()
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
 # App
 # ──────────────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="WorldSim API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="WorldSim 2.0 API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -81,18 +81,16 @@ app.add_middleware(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# WebSocket endpoint
+# WebSocket endpoints
 # ──────────────────────────────────────────────────────────────────────────────
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket) -> None:
+async def _handle_ws(websocket: WebSocket) -> None:
     await websocket.accept()
     _clients.add(websocket)
     client = websocket.client
     logger.info("Client connected: %s  (total: %d)", client, len(_clients))
     try:
         while True:
-            # Keep alive – we push; client just needs to stay connected
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
@@ -103,8 +101,19 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         logger.info("Client disconnected. (remaining: %d)", len(_clients))
 
 
+@app.websocket("/ws/world-state")
+async def websocket_world_state(websocket: WebSocket) -> None:
+    await _handle_ws(websocket)
+
+
+# Backward-compat alias
+@app.websocket("/ws")
+async def websocket_legacy(websocket: WebSocket) -> None:
+    await _handle_ws(websocket)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
-# Health check
+# REST endpoints
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -133,8 +142,5 @@ async def control(body: dict) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ──────────────────────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False, log_level="info")

@@ -3,76 +3,114 @@ import Dashboard from './components/Dashboard'
 import GameView from './components/GameView'
 import { useWorldStore } from './store/useWorldStore'
 
+const CLIMATE_BANNERS: Record<string, { label: string; color: string; bg: string }> = {
+  Drought:    { label: '☀️  DROUGHT — Water reserves dropping across all nations', color: '#ff9944', bg: '#3d1500' },
+  SolarFlare: { label: '⚡  SOLAR FLARE — Energy surging, crime destabilising',    color: '#ffee44', bg: '#2d2000' },
+  Blight:     { label: '🍂  BLIGHT — Food supplies failing across the continent',   color: '#88bb44', bg: '#1a2200' },
+}
+
 export default function App() {
-  const connect = useWorldStore(s => s.connect)
-  const tick    = useWorldStore(s => s.tick)
-  const connected = useWorldStore(s => s.connected)
-  const isRunning = useWorldStore(s => s.isRunning)
+  const connect      = useWorldStore(s => s.connect)
+  const tick         = useWorldStore(s => s.tick)
+  const connected    = useWorldStore(s => s.connected)
+  const isRunning    = useWorldStore(s => s.isRunning)
+  const climate      = useWorldStore(s => s.climateEvent)
 
   useEffect(() => { connect() }, [connect])
 
-  return (
-    <div className="flex h-screen w-screen overflow-hidden bg-gray-950">
+  const banner = climate.type ? CLIMATE_BANNERS[climate.type] : null
 
-      {/* ── Sidebar ───────────────────────────────────────────── */}
-      <div className="flex-none overflow-y-auto border-r border-slate-800/60" style={{ width:'320px' }}>
+  return (
+    <div style={{ display:'flex', height:'100vh', width:'100vw', overflow:'hidden', background:'#020508', fontFamily:'Inter, sans-serif' }}>
+
+      {/* ── Sidebar ────────────────────────────────────────────── */}
+      <div style={{ flexShrink:0, width:310, overflowY:'auto', borderRight:'1px solid #131825' }}>
         <Dashboard />
       </div>
 
-      {/* ── Main canvas ───────────────────────────────────────── */}
-      <div className="relative flex-1 overflow-hidden">
+      {/* ── Main canvas ────────────────────────────────────────── */}
+      <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
+
         {/* HUD bar */}
-        <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-4 px-4 py-2
-                        bg-gray-950/80 backdrop-blur border-b border-slate-800/50">
-          <span className="text-xs font-mono text-slate-500 uppercase tracking-widest">World Map</span>
-          <div className="ml-auto flex items-center gap-3">
-            <span className="text-xs font-mono text-slate-500">Tick #{tick.toLocaleString()}</span>
-            <span className={`flex items-center gap-1.5 text-xs font-mono px-2 py-0.5 rounded-full border
-              ${connected ? 'text-emerald-400 border-emerald-800 bg-emerald-950/40' : 'text-red-400 border-red-900 bg-red-950/40'}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'}`}/>
+        <div style={{
+          position:'absolute', top:0, left:0, right:0, zIndex:10,
+          display:'flex', alignItems:'center', gap:12, padding:'6px 14px',
+          background:'rgba(2,5,10,0.85)', backdropFilter:'blur(8px)',
+          borderBottom:'1px solid #131825',
+        }}>
+          <span style={{ fontSize:11, fontFamily:'JetBrains Mono, monospace', color:'#2a3a4a', letterSpacing:2, textTransform:'uppercase' }}>
+            Sovereign Nations · World Map
+          </span>
+          <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:10 }}>
+            <span style={{ fontSize:10, fontFamily:'monospace', color:'#2a3a55' }}>
+              Tick #{tick.toLocaleString()}
+            </span>
+            <span style={{
+              fontSize:10, fontFamily:'monospace', padding:'2px 8px', borderRadius:99, border:'1px solid',
+              color:      connected ? '#44ee88' : '#ff5555',
+              borderColor:connected ? '#44ee8855' : '#ff555555',
+              background: connected ? 'rgba(68,238,136,0.07)' : 'rgba(255,85,85,0.07)',
+            }}>
+              <span style={{ display:'inline-block', width:6, height:6, borderRadius:'50%',
+                background: connected ? '#44ee88' : '#ff5555',
+                animation: connected ? 'none' : undefined, marginRight:5, verticalAlign:'middle' }} />
               {connected ? 'Connected' : 'Disconnected'}
             </span>
           </div>
         </div>
 
+        {/* Climate banner */}
+        {banner && (
+          <div style={{
+            position:'absolute', top:36, left:0, right:0, zIndex:10,
+            background:banner.bg, borderBottom:`1px solid ${banner.color}44`,
+            padding:'4px 14px', fontSize:11, fontFamily:'JetBrains Mono, monospace',
+            color:banner.color, fontWeight:600, letterSpacing:0.5,
+          }}>
+            {banner.label} — {climate.duration_remaining} ticks remaining
+          </div>
+        )}
+
         {/* Phaser canvas */}
-        <div className="absolute inset-0 pt-9">
+        <div style={{ position:'absolute', inset:0, paddingTop: banner ? 68 : 36 }}>
           <GameView />
         </div>
 
         {/* Legend */}
-        <div className="absolute bottom-3 left-3 z-10 glass rounded-xl p-2.5 flex flex-col gap-1">
+        <div style={{
+          position:'absolute', bottom:12, left:12, zIndex:10,
+          background:'rgba(2,5,12,0.82)', border:'1px solid #151e2a', backdropFilter:'blur(6px)',
+          borderRadius:10, padding:'8px 10px', display:'flex', flexDirection:'column', gap:4,
+        }}>
           {[
-            ['CBD Core','#FF4444','🌆 High energy · High crime'],
-            ['Waterfront','#4488FF','🌊 Safe haven · Water rich'],
-            ['Industrial','#FFCC00','🏭 Food abundant · Factories'],
-            ['Slums','#AA2222','💀 Dangerous · Flee zone'],
-            ['Hilly Suburbs','#996633','🏡 Balanced · Low crime'],
-          ].map(([name,color,desc])=>(
-            <div key={name} className="flex items-center gap-2">
-              <div className="h-2.5 w-2.5 rounded-sm flex-none" style={{ background:color }}/>
-              <div>
-                <span className="text-[11px] text-slate-200 font-medium">{name}</span>
-                <span className="text-[9px] text-slate-500 ml-1">{desc}</span>
-              </div>
+            ['AQUILONIA',  '#4A9EFF', '🛡️ Fortress · Water-rich'],
+            ['VERDANTIS',  '#4CAF50', '🌿 Equilibrium · Food-rich'],
+            ['IGNIS CORE', '#FF7043', '🔥 Expansionist · Energy-rich'],
+            ['TERRANOVA',  '#A08040', '⚔️ Parasite · Land-rich'],
+            ['THE NEXUS',  '#AB7FE0', '🔮 Collaborator · Balanced'],
+          ].map(([name, color, desc]) => (
+            <div key={name} style={{ display:'flex', alignItems:'center', gap:7 }}>
+              <div style={{ width:9, height:9, borderRadius:2, background:color, flexShrink:0 }} />
+              <span style={{ fontSize:10, color:'#b0b8c8', fontFamily:'Inter, sans-serif', fontWeight:600 }}>{name}</span>
+              <span style={{ fontSize:9, color:'#445566' }}>{desc}</span>
             </div>
           ))}
         </div>
 
         {/* Paused overlay */}
         {!isRunning && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
-            <div className="glass rounded-2xl px-10 py-5 text-center border border-amber-800/40">
-              <div className="text-4xl mb-2">⏸</div>
-              <div className="text-amber-400 font-bold text-lg">Simulation Paused</div>
-              <div className="text-slate-500 text-xs mt-1">Press Start to resume</div>
+          <div style={{ position:'absolute', inset:0, zIndex:20, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
+            <div style={{ background:'rgba(5,8,18,0.85)', border:'1px solid #3a4a2a', borderRadius:16, padding:'24px 40px', textAlign:'center' }}>
+              <div style={{ fontSize:36, marginBottom:8 }}>⏸</div>
+              <div style={{ color:'#ccaa44', fontWeight:700, fontSize:18 }}>Simulation Paused</div>
+              <div style={{ color:'#445566', fontSize:11, marginTop:4, fontFamily:'monospace' }}>Press Resume in sidebar to continue</div>
             </div>
           </div>
         )}
 
         {/* Footer hint */}
-        <div className="absolute bottom-3 right-3 z-10 text-[10px] font-mono text-slate-700">
-          Autonomous AI · 2 ticks/sec
+        <div style={{ position:'absolute', bottom:12, right:14, zIndex:10, fontSize:9, fontFamily:'monospace', color:'#1a2535' }}>
+          Autonomous AI · 2 ticks/sec · Mesa 3.5 + PPO
         </div>
       </div>
     </div>

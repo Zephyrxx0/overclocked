@@ -1,54 +1,80 @@
 import { create } from 'zustand'
 
 export interface ResourceMap {
-  energy: number; water: number; food: number; land: number
+  water: number
+  food: number
+  energy: number
+  land: number
 }
+
 export interface RegionState {
-  id: string; name: string; position: string; color_hint: string
-  resources: ResourceMap; crime_rate: number; population: number; last_action: string
+  id: string
+  name: string
+  title: string
+  color_hint: string
+  tribe: string
+  position: string
+  resources: ResourceMap
+  crime_rate: number
+  population: number
+  last_action: 'Conserve' | 'Trade' | 'Expand' | 'Conflict'
 }
-export interface PlayerStats {
-  energy: number; hunger: number; thirst: number; safety: number; happiness: number
-  currentRegion: string; isMoving: boolean
+
+export interface ClimateEvent {
+  type: 'Drought' | 'SolarFlare' | 'Blight' | null
+  duration_remaining: number
 }
+
 interface WorldStore {
   tick: number
   regions: RegionState[]
   connected: boolean
   isRunning: boolean
-  player: PlayerStats
+  climateEvent: ClimateEvent
   history: { tick: number; [k: string]: number }[]
   connect: () => void
   toggleRunning: () => void
-  setPlayer: (p: Partial<PlayerStats>) => void
-}
-
-const DEFAULT_PLAYER: PlayerStats = {
-  energy: 80, hunger: 75, thirst: 80, safety: 85, happiness: 80,
-  currentRegion: 'WATERFRONT', isMoving: false,
 }
 
 export const useWorldStore = create<WorldStore>((set, get) => ({
-  tick: 0, regions: [], connected: false, isRunning: true,
-  player: DEFAULT_PLAYER, history: [],
+  tick: 0,
+  regions: [],
+  connected: false,
+  isRunning: true,
+  climateEvent: { type: null, duration_remaining: 0 },
+  history: [],
 
   connect() {
     if (get().connected) return
-    const ws = new WebSocket('ws://localhost:8000/ws')
+    // Try new endpoint first, fall back to legacy /ws
+    const ws = new WebSocket('ws://localhost:8000/ws/world-state')
     ws.onopen = () => set({ connected: true })
-    ws.onclose = () => { set({ connected: false }); setTimeout(() => get().connect(), 2000) }
+    ws.onclose = () => {
+      set({ connected: false })
+      setTimeout(() => get().connect(), 2000)
+    }
     ws.onerror = () => ws.close()
     ws.onmessage = (e: MessageEvent) => {
       try {
-        const data: { tick: number; regions: RegionState[] } = JSON.parse(e.data)
+        const data: {
+          tick: number
+          regions: RegionState[]
+          climate_event: ClimateEvent
+        } = JSON.parse(e.data)
+
         const entry: Record<string, number> = { tick: data.tick }
-        for (const r of data.regions) entry[r.id] = r.crime_rate
+        for (const r of data.regions) {
+          entry[r.id + '_crime'] = r.crime_rate
+          entry[r.id + '_energy'] = r.resources.energy
+        }
+
         set(s => ({
           tick: data.tick,
           regions: data.regions,
-          history: [...s.history.slice(-59), entry as WorldStore['history'][number]],
+          climateEvent: data.climate_event ?? { type: null, duration_remaining: 0 },
+          history: [...s.history.slice(-79), entry as WorldStore['history'][number]],
         }))
-      } catch {}
+      } catch { /* ignore malformed */ }
     }
   },
 
@@ -60,11 +86,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: running ? 'start' : 'stop' }),
       })
-    } catch {}
+    } catch { /* offline */ }
     set({ isRunning: running })
-  },
-
-  setPlayer(p) {
-    set(s => ({ player: { ...s.player, ...p } }))
   },
 }))
