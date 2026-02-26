@@ -1,630 +1,664 @@
 /**
- * IsoScene.ts — WorldSim 2.0 Sovereign Nations Renderer
+ * IsoScene.ts — WorldSim 2.0  •  Isometric Voxel Renderer
  *
- * Five sovereign nations on a pentagonal layout with:
- *  • Distinct tile textures/colors per nation
- *  • Crime Pulse: animating red halo on high-crime regions
- *  • Energy Beams: sparkle lines between trading nations
- *  • Climate Particles: rain / solar flare / blight spores
- *  • President Sprites: icon shape changes by action (Conserve/Trade/Expand/Conflict)
- *  • Micro-animations: water shimmer, heat distortion, territory cracks, orbiting rings
+ * True 2D isometric projection (no Three.js). Each region is a cluster of
+ * drawn iso-blocks (top + left + right faces) forming biome-themed structures:
+ *
+ *  AQUILONIA  — Prismarine Ocean Monument (blue/cyan deep-water blocks)
+ *  VERDANTIS  — Farmland + Dark Oak Village (green/brown farm structures)
+ *  IGNIS CORE — Magma + Iron Factory (orange/grey chimney stacks)
+ *  TERRANOVA  — Cobblestone Mountain Outpost (grey stone fortifications)
+ *  THE NEXUS  — Quartz + Gold Trade HQ (white/gold multi-story hub)
+ *
+ * Dynamic effects:
+ *  • Trade  → glowing particle "minecart" trails along beam paths
+ *  • Conflict → TNT flash + debris particles at target border
+ *  • Drought  → affected tiles shift sandy-brown
+ *  • Blight   → purple mycelium overlay on farmland tiles
+ *  • Crime Pulse → red iso-ring around hot regions
  */
 import Phaser from 'phaser'
 import { RegionState, ClimateEvent, useWorldStore } from '../store/useWorldStore'
 
-// ─── Layout: pentagonal arrangement ──────────────────────────────────────────
-interface NLayout {
-  fx: number; fy: number; fw: number; fh: number
-  fill: number; border: number; labelCol: string
-  accentFill: number
-}
-const LAYOUTS: Record<string, NLayout> = {
-  AQUILONIA:  { fx:0.01, fy:0.02, fw:0.32, fh:0.44, fill:0x071428, border:0x4A9EFF, labelCol:'#7bbfff', accentFill:0x0a2a5c },
-  VERDANTIS:  { fx:0.67, fy:0.02, fw:0.32, fh:0.44, fill:0x071408, border:0x4CAF50, labelCol:'#7ddf85', accentFill:0x0d3a12 },
-  IGNIS_CORE: { fx:0.34, fy:0.26, fw:0.32, fh:0.44, fill:0x1c0803, border:0xFF7043, labelCol:'#ff9a7a', accentFill:0x3d1008 },
-  TERRANOVA:  { fx:0.01, fy:0.53, fw:0.32, fh:0.44, fill:0x12100a, border:0xA08040, labelCol:'#c8a052', accentFill:0x2a2010 },
-  THE_NEXUS:  { fx:0.67, fy:0.53, fw:0.32, fh:0.44, fill:0x0d0814, border:0xAB7FE0, labelCol:'#c9a5f7', accentFill:0x1d1230 },
+// ─── Isometric math ───────────────────────────────────────────────────────────
+const TW = 36   // tile width  (2:1 ratio)
+const TH = 18   // tile height
+
+function isoToScreen(col: number, row: number): { x: number; y: number } {
+  return {
+    x: (col - row) * (TW / 2),
+    y: (col + row) * (TH / 2),
+  }
 }
 
-const NATION_NAMES: Record<string, string> = {
-  AQUILONIA:  '🛡️ Aquilonia',
-  VERDANTIS:  '🌿 Verdantis',
-  IGNIS_CORE: '🔥 Ignis Core',
-  TERRANOVA:  '⚔️ Terranova',
-  THE_NEXUS:  '🔮 The Nexus',
+// Draw one iso block (top + left + right face)
+function drawBlock(g: Phaser.GameObjects.Graphics, cx: number, cy: number,
+  topCol: number, leftCol: number, rightCol: number, alpha = 1) {
+  const hw = TW / 2, hh = TH / 2
+  // top face (diamond)
+  g.fillStyle(topCol, alpha)
+  g.fillTriangle(cx, cy - hh, cx + hw, cy, cx, cy + hh)
+  g.fillTriangle(cx, cy - hh, cx - hw, cy, cx, cy + hh)
+  // left face
+  g.fillStyle(leftCol, alpha)
+  g.fillTriangle(cx - hw, cy, cx, cy + hh, cx, cy + hh + TH)
+  g.fillTriangle(cx - hw, cy, cx - hw, cy + TH, cx, cy + hh + TH)
+  // right face
+  g.fillStyle(rightCol, alpha)
+  g.fillTriangle(cx + hw, cy, cx, cy + hh, cx, cy + hh + TH)
+  g.fillTriangle(cx + hw, cy, cx + hw, cy + TH, cx, cy + hh + TH)
+}
+
+function drawIsoOutline(g: Phaser.GameObjects.Graphics, cx: number, cy: number, col: number, alpha: number) {
+  const hw = TW / 2, hh = TH / 2
+  g.lineStyle(1, col, alpha)
+  g.strokeTriangle(cx, cy - hh, cx + hw, cy, cx, cy + hh)
+  g.strokeTriangle(cx, cy - hh, cx - hw, cy, cx, cy + hh)
+}
+
+// ─── Biome palettes ───────────────────────────────────────────────────────────
+interface Palette { top: number; left: number; right: number; accent: number }
+
+const BIOMES: Record<string, Palette[]> = {
+  AQUILONIA: [
+    { top:0x1a6b8a, left:0x0d3d52, right:0x0a2e3e, accent:0x2aafcc }, // prismarine
+    { top:0x115577, left:0x0a3344, right:0x06222e, accent:0x1a8aaa }, // dark prismarine
+    { top:0x22ddee, left:0x0a8899, right:0x066677, accent:0x55ffee }, // sea lantern glow
+  ],
+  VERDANTIS: [
+    { top:0x5a8a3a, left:0x3d5c27, right:0x2e4420, accent:0x7acc55 }, // grass
+    { top:0x7c5c38, left:0x4a3822, right:0x362a18, accent:0xa07848 }, // farmland / dirt
+    { top:0x2a4a1a, left:0x1a3010, right:0x10200a, accent:0x4a8a2a }, // dark oak
+  ],
+  IGNIS_CORE: [
+    { top:0xcc4400, left:0x882200, right:0x661800, accent:0xff7722 }, // magma
+    { top:0x888888, left:0x555555, right:0x3a3a3a, accent:0xbbbbbb }, // iron
+    { top:0xdd6600, left:0x994400, right:0x663300, accent:0xff9944 }, // hot stone
+  ],
+  TERRANOVA: [
+    { top:0x7a7a7a, left:0x4a4a4a, right:0x303030, accent:0xaaaaaa }, // stone
+    { top:0x606060, left:0x3a3a3a, right:0x252525, accent:0x909090 }, // cobblestone
+    { top:0x5a4a3a, left:0x3a2e26, right:0x28201c, accent:0x8a7a6a }, // gravel
+  ],
+  THE_NEXUS: [
+    { top:0xeeeeee, left:0xaaaaaa, right:0x888888, accent:0xffffff }, // quartz
+    { top:0xddcc44, left:0xaa8822, right:0x886611, accent:0xffee66 }, // gold
+    { top:0xccddee, left:0x8899aa, right:0x667788, accent:0xddeeff }, // quartz pillar
+  ],
+}
+
+// ─── Region cluster definitions ───────────────────────────────────────────────
+// Each entry: [col, row, paletteIndex, heightStacks]
+type BlockDef = [number, number, number, number]
+
+const CLUSTERS: Record<string, BlockDef[]> = {
+  AQUILONIA: [
+    // Ocean Monument base
+    [-2,0,0,1],[-1,0,0,2],[0,0,2,3],[1,0,0,2],[2,0,0,1],
+    [-2,1,0,1],[-1,1,1,2],[0,1,0,4],[1,1,1,2],[2,1,0,1],
+    [-1,2,0,1],[0,2,2,2],[1,2,0,1],
+    [0,3,2,1],
+    // Side towers
+    [-3,-1,1,3],[3,-1,1,3],[-3,2,1,2],[3,2,1,2],
+  ],
+  VERDANTIS: [
+    // Farm field base
+    [-2,0,1,1],[-1,0,1,1],[0,0,1,1],[1,0,1,1],[2,0,1,1],
+    [-2,1,0,1],[-1,1,0,1],[0,1,0,1],[1,1,0,1],[2,1,0,1],
+    [-2,2,1,1],[-1,2,1,1],[0,2,1,1],[1,2,1,1],[2,2,1,1],
+    // Farmhouse
+    [-1,-1,2,2],[0,-1,2,3],[1,-1,2,2],
+    // Spruce trees
+    [-3,0,2,3],[-3,1,2,2],[3,0,2,3],[3,2,2,2],
+  ],
+  IGNIS_CORE: [
+    // Factory floor
+    [-2,0,2,1],[-1,0,0,1],[0,0,0,1],[1,0,2,1],[2,0,0,1],
+    [-2,1,0,1],[-1,1,0,1],[0,1,0,1],[1,1,0,1],[2,1,0,1],
+    [0,2,0,1],[1,2,0,1],
+    // Chimneys (tall stacks)
+    [-1,-1,1,5],[0,-1,1,7],[1,-1,1,5],
+    [-2,-1,2,3],[2,-1,2,3],
+    // Industrial shed
+    [-2,0,1,2],[2,0,1,2],
+  ],
+  TERRANOVA: [
+    // Mountain base
+    [-1,1,0,1],[0,1,1,2],[1,1,0,1],
+    [-2,0,1,1],[-1,0,0,3],[0,0,0,5],[1,0,1,3],[2,0,0,1],
+    [-2,-1,0,2],[-1,-1,1,4],[0,-1,0,6],[1,-1,0,4],[2,-1,1,2],
+    [-1,-2,0,3],[0,-2,1,5],[1,-2,0,3],
+    [0,-3,0,4],
+    // Outpost walls
+    [-3,0,1,2],[3,0,1,2],[-3,-1,0,3],[3,-1,0,3],
+  ],
+  THE_NEXUS: [
+    // Trade hub foundation
+    [-2,0,0,1],[-1,0,2,2],[0,0,0,1],[1,0,2,2],[2,0,0,1],
+    [-1,1,0,1],[0,1,1,2],[1,1,0,1],
+    // Main tower
+    [-1,-1,2,3],[0,-1,0,6],[1,-1,2,3],
+    [0,-2,0,4],[-1,-2,2,2],[1,-2,2,2],
+    [0,-3,1,5],[0,-4,2,3],
+    // Gold pillars
+    [-2,-1,1,4],[2,-1,1,4],[-2,-2,1,2],[2,-2,1,2],
+  ],
+}
+
+// ─── Layout: where each region cluster is centered on screen ─────────────────
+interface NLayout { fx:number; fy:number; fw:number; fh:number; border:number; labelCol:string }
+
+const LAYOUTS: Record<string, NLayout> = {
+  AQUILONIA:  { fx:0.01, fy:0.02, fw:0.32, fh:0.44, border:0x2aafcc, labelCol:'#7bddef' },
+  VERDANTIS:  { fx:0.67, fy:0.02, fw:0.32, fh:0.44, border:0x7acc55, labelCol:'#9dff77' },
+  IGNIS_CORE: { fx:0.34, fy:0.26, fw:0.32, fh:0.44, border:0xff7722, labelCol:'#ff9a7a' },
+  TERRANOVA:  { fx:0.01, fy:0.53, fw:0.32, fh:0.44, border:0xaaaaaa, labelCol:'#cccccc' },
+  THE_NEXUS:  { fx:0.67, fy:0.53, fw:0.32, fh:0.44, border:0xffee66, labelCol:'#ffee99' },
+}
+
+const NATION_HEADER: Record<string, { line1:string; line2:string; line3:string }> = {
+  AQUILONIA:  { line1:'💧 AQUILONIA',  line2:'Water Dominance',   line3:'Hoard & Defend'    },
+  VERDANTIS:  { line1:'🌾 VERDANTIS',  line2:'Food Surplus',      line3:'Balance All 4'     },
+  IGNIS_CORE: { line1:'⚡ IGNIS CORE', line2:'Energy Powerhouse', line3:'Expand & Burn'     },
+  TERRANOVA:  { line1:'🪨 TERRANOVA',  line2:'Vast Landmass',     line3:'Conflict & Steal'  },
+  THE_NEXUS:  { line1:'⚖️ THE NEXUS',  line2:'Balanced Hub',      line3:'Trade & Stability' },
 }
 
 const PRESIDENT_NAMES: Record<string, string> = {
-  AQUILONIA:  'Pres. Aldric',
-  VERDANTIS:  'Pres. Sylvara',
-  IGNIS_CORE: 'Pres. Ignar',
-  TERRANOVA:  'Pres. Vorn',
-  THE_NEXUS:  'Pres. Aura',
+  AQUILONIA:'Pres. Aldric', VERDANTIS:'Pres. Sylvara', IGNIS_CORE:'Pres. Ignar', TERRANOVA:'Pres. Vorn', THE_NEXUS:'Pres. Aura',
 }
+
+const RES_KEYS  = ['water','food','energy','land'] as const
+const RES_LABEL = ['💧W','🌾F','⚡E','🏔L']
+const RES_COLS  = [0x2aafcc, 0x7acc55, 0xff7722, 0xaaaaaa]
+const RES_STR   = ['#2aafcc','#7acc55','#ff7722','#cccccc']
 
 // ─── Particle types ───────────────────────────────────────────────────────────
-interface Particle { x: number; y: number; vx: number; vy: number; alpha: number; r: number; color: number; life: number }
+interface Particle { x:number; y:number; vx:number; vy:number; alpha:number; r:number; color:number; life:number; square?:boolean }
 
-function seededRand(n: number) { const x = Math.sin(n + 13) * 92834.5; return x - Math.floor(x) }
-function lerp(a: number, b: number, t: number) { return a + (b - a) * t }
-function clamp(v: number, mn: number, mx: number) { return Math.max(mn, Math.min(mx, v)) }
+function seededRand(n:number){ const x=Math.sin(n+13)*92834.5; return x-Math.floor(x) }
+function lerp(a:number,b:number,t:number){ return a+(b-a)*t }
+function clamp(v:number,mn:number,mx:number){ return Math.max(mn,Math.min(mx,v)) }
+function hash(s:string){ let h=0; for(let i=0;i<s.length;i++) h=(Math.imul(31,h)+s.charCodeAt(i))|0; return Math.abs(h)%100 }
 
 export class IsoScene extends Phaser.Scene {
-  private bgGfx!: Phaser.GameObjects.Graphics     // static background
-  private dynGfx!: Phaser.GameObjects.Graphics    // animated overlays
-  private beamGfx!: Phaser.GameObjects.Graphics   // energy beams
-  private particleGfx!: Phaser.GameObjects.Graphics
-  private presidentGfx!: Phaser.GameObjects.Graphics
+  private bgGfx!:        Phaser.GameObjects.Graphics  // static voxel scene
+  private clusterGfx!:   Phaser.GameObjects.Graphics  // animated cluster overlays (drought/blight)
+  private beamGfx!:      Phaser.GameObjects.Graphics  // trade beams + conflict
+  private particleGfx!:  Phaser.GameObjects.Graphics  // particles (TNT, minecart, weather)
+  private resBarGfx!:    Phaser.GameObjects.Graphics  // resource bars
+  private overlayGfx!:   Phaser.GameObjects.Graphics  // crime halos, dominance rings
 
-  private nameLabels: Map<string, Phaser.GameObjects.Text> = new Map()
-  private crimeLabels: Map<string, Phaser.GameObjects.Text> = new Map()
-  private actionLabels: Map<string, Phaser.GameObjects.Text> = new Map()
-  private presidentLabels: Map<string, Phaser.GameObjects.Text> = new Map()
+  private nameLine1:    Map<string,Phaser.GameObjects.Text> = new Map()
+  private nameLine2:    Map<string,Phaser.GameObjects.Text> = new Map()
+  private nameLine3:    Map<string,Phaser.GameObjects.Text> = new Map()
+  private presLabels:   Map<string,Phaser.GameObjects.Text> = new Map()
+  private crimeLabels:  Map<string,Phaser.GameObjects.Text> = new Map()
+  private actionLabels: Map<string,Phaser.GameObjects.Text> = new Map()
+  private resIconLbls:  Map<string,Phaser.GameObjects.Text> = new Map()
+  private resPctLbls:   Map<string,Phaser.GameObjects.Text> = new Map()
 
-  private phase = 0         // master animation phase
+  private phase   = 0
   private regions: RegionState[] = []
-  private climate: ClimateEvent = { type: null, duration_remaining: 0 }
-  private particles: Particle[] = []
+  private climate: ClimateEvent  = { type:null, duration_remaining:0 }
+  private particles: Particle[]  = []
   private running = true
+  private tntTargets: Record<string,number> = {}  // region -> tnt flash ticks remaining
+  private _unsub: (()=>void)|null = null
+  private beamAlphas: Record<string,number> = {}
 
-  // Per-nation animated state
-  private crimeAlphas: Record<string, number> = {}
-  private beamAlphas: Record<string, number> = {}  // keyed as "A-B"
+  constructor(){ super({ key:'IsoScene' }) }
 
-  constructor() { super({ key: 'IsoScene' }) }
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-  // ── Lifecycle ────────────────────────────────────────────────────────────
-
-  create() {
-    const { width: W, height: H } = this.scale
-
-    this.bgGfx        = this.add.graphics()
-    this.dynGfx       = this.add.graphics()
-    this.beamGfx      = this.add.graphics()
-    this.particleGfx  = this.add.graphics()
-    this.presidentGfx = this.add.graphics()
-
-    this._drawBackground(W, H)
+  create(){
+    const { width:W, height:H } = this.scale
+    this.bgGfx       = this.add.graphics()
+    this.clusterGfx  = this.add.graphics()
+    this.beamGfx     = this.add.graphics()
+    this.particleGfx = this.add.graphics()
+    this.resBarGfx   = this.add.graphics()
+    this.overlayGfx  = this.add.graphics()
+    this._drawVoxelScene(W, H)
     this._createLabels(W, H)
-
-    this.scale.on('resize', (_: unknown, gSize: Phaser.Structs.Size) => {
-      this._onResize(gSize.width, gSize.height)
-    })
-
-    // Subscribe to Zustand store
-    useWorldStore.subscribe(state => {
-      this.regions = state.regions
-      this.climate = state.climateEvent
-    })
+    this.scale.on('resize', (_:unknown, gs:Phaser.Structs.Size) => this._onResize(gs.width, gs.height))
+    this._unsub = useWorldStore.subscribe(s => { this.regions=s.regions; this.climate=s.climateEvent })
   }
 
-  update(_t: number, delta: number) {
-    if (!this.running) return
-    this.phase += delta * 0.001
-    const { width: W, height: H } = this.scale
-    this._drawDynamic(W, H)
-    this._drawBeams(W, H)
-    this._drawParticles(W, H, delta)
-    this._drawPresidents(W, H)
-    this._updateLabels(W, H)
-  }
-
-  setRunning(r: boolean) { this.running = r }
-  applyWorldState(regions: RegionState[]) { this.regions = regions }
-
-  // ── Background ───────────────────────────────────────────────────────────
-
-  private _drawBackground(W: number, H: number) {
-    const g = this.bgGfx
-    g.clear()
-
-    // Deep space background gradient (dark)
-    g.fillGradientStyle(0x000510, 0x000510, 0x05020a, 0x05020a, 1)
-    g.fillRect(0, 0, W, H)
-
-    // Star field
-    for (let i = 0; i < 120; i++) {
-      const sx = seededRand(i * 3.7) * W
-      const sy = seededRand(i * 2.9) * H
-      const sr2 = 0.5 + seededRand(i * 5.1) * 1.5
-      const sa = 0.3 + seededRand(i * 7.3) * 0.5
-      g.fillStyle(0xffffff, sa)
-      g.fillCircle(sx, sy, sr2)
+  update(_t:number, delta:number){
+    this.phase += delta*0.001
+    const { width:W, height:H } = this.scale
+    if(!this.running){
+      [this.clusterGfx,this.beamGfx,this.particleGfx,this.resBarGfx,this.overlayGfx].forEach(g=>g.clear())
+      return
     }
+    this._drawClusterOverlays(W,H)
+    this._drawBeamsAndConflict(W,H,delta)
+    this._updateParticles(W,H,delta)
+    this._drawResourceBars(W,H)
+    this._drawOverlays(W,H)
+    this._updateLabels(W,H)
+  }
 
-    // Draw road connections between all nations
-    this._drawRoads(g, W, H)
+  shutdown(){ this._unsub?.(); this._unsub=null }
+  setRunning(r:boolean){ this.running=r }
+  applyWorldState(r:RegionState[]){ this.regions=r }
 
-    // Draw each nation tile
-    for (const id of Object.keys(LAYOUTS)) {
-      this._drawNationTile(id, W, H)
+  // ── Static Voxel Scene ─────────────────────────────────────────────────────
+
+  private _drawVoxelScene(W:number, H:number){
+    const g = this.bgGfx; g.clear()
+    // Void background — deep dark like Minecraft underground
+    g.fillGradientStyle(0x050810,0x050810,0x080510,0x080510,1)
+    g.fillRect(0,0,W,H)
+    // Pixel star field
+    for(let i=0;i<100;i++){
+      g.fillStyle(0xffffff, 0.15+seededRand(i*7)*0.4)
+      g.fillRect(Math.floor(seededRand(i*3.7)*W), Math.floor(seededRand(i*2.9)*H), 1, 1)
+    }
+    // Ground plane grid (isometric)
+    this._drawGroundPlane(g,W,H)
+    // Draw region tile areas
+    for(const id of Object.keys(LAYOUTS)) this._drawRegionArea(id,g,W,H)
+    // Draw voxel clusters for each region
+    for(const id of Object.keys(LAYOUTS)) this._drawCluster(id,g,W,H)
+  }
+
+  private _drawGroundPlane(g:Phaser.GameObjects.Graphics, W:number, H:number){
+    g.lineStyle(1,0x1a2030,0.4)
+    // Horizontal iso lines
+    for(let row=-2;row<12;row++){
+      const p1=isoToScreen(-6,row), p2=isoToScreen(6,row)
+      g.lineBetween(W/2+p1.x,H/2+p1.y,W/2+p2.x,H/2+p2.y)
+    }
+    // Vertical iso lines
+    for(let col=-6;col<=6;col++){
+      const p1=isoToScreen(col,-2), p2=isoToScreen(col,11)
+      g.lineBetween(W/2+p1.x,H/2+p1.y,W/2+p2.x,H/2+p2.y)
     }
   }
 
-  private _drawRoads(g: Phaser.GameObjects.Graphics, W: number, H: number) {
-    const centers: Record<string, { x: number; y: number }> = {}
-    for (const id of Object.keys(LAYOUTS)) centers[id] = this._center(id, W, H)
+  private _drawRegionArea(id:string, g:Phaser.GameObjects.Graphics, W:number, H:number){
+    const l=LAYOUTS[id]
+    const x=l.fx*W, y=l.fy*H, w=l.fw*W, h=l.fh*H
+    // Dark area tile frame
+    g.fillStyle(0x050a12,0.65); g.fillRect(x,y,w,h)
+    g.lineStyle(2,l.border,0.7); g.strokeRect(x,y,w,h)
+    g.lineStyle(6,l.border,0.1); g.strokeRect(x-3,y-3,w+6,h+6)
+    // Inner checkerboard hint (iso floor)
+    for(let row=0;row<3;row++){
+      for(let col=0;col<4;col++){
+        if((col+row)%2===0){
+          g.fillStyle(0x0a101e,0.4)
+          g.fillRect(x+col*(w/4),y+h*0.55+row*(h*0.15),w/4,h*0.15)
+        }
+      }
+    }
+  }
 
-    const pairs = [
-      ['AQUILONIA',  'IGNIS_CORE'],
-      ['VERDANTIS',  'IGNIS_CORE'],
-      ['IGNIS_CORE', 'TERRANOVA'],
-      ['IGNIS_CORE', 'THE_NEXUS'],
-      ['AQUILONIA',  'TERRANOVA'],
-      ['VERDANTIS',  'THE_NEXUS'],
+  private _drawCluster(id:string, g:Phaser.GameObjects.Graphics, W:number, H:number){
+    const l=LAYOUTS[id]
+    const cx=(l.fx+l.fw/2)*W, cy=(l.fy+l.fh*0.52)*H
+    const palette=BIOMES[id]
+    const blocks=CLUSTERS[id]
+
+    // Sort back-to-front (painter's algorithm for isometric)
+    const sorted=[...blocks].sort(([c1,r1],[c2,r2])=>(c1+r1)-(c2+r2))
+
+    for(const [col,row,palIdx,stacks] of sorted){
+      const pal=palette[palIdx%palette.length]
+      const iso=isoToScreen(col,row)
+      const bx=cx+iso.x, by=cy+iso.y
+
+      for(let s=0;s<stacks;s++){
+        const stackOff=s*TH
+        const dimFactor=1-s*0.07
+        const top  =this._dimColor(pal.top,dimFactor)
+        const left =this._dimColor(pal.left,dimFactor)
+        const right=this._dimColor(pal.right,dimFactor)
+        drawBlock(g, bx, by-stackOff, top, left, right)
+      }
+      // Block edge lines (pixel art crispness)
+      drawIsoOutline(g, bx, by-((stacks-1)*TH), pal.accent, 0.3)
+    }
+  }
+
+  private _dimColor(col:number, factor:number):number {
+    const r=Math.floor(((col>>16)&0xff)*factor)
+    const gv=Math.floor(((col>>8)&0xff)*factor)
+    const b=Math.floor((col&0xff)*factor)
+    return (r<<16)|(gv<<8)|b
+  }
+
+  // ── Labels ─────────────────────────────────────────────────────────────────
+
+  private _createLabels(W:number, H:number){
+    for(const id of Object.keys(LAYOUTS)){
+      const l=LAYOUTS[id], nh=NATION_HEADER[id]
+      const cx=(l.fx+l.fw/2)*W, ty=l.fy*H
+
+      this.nameLine1.set(id, this.add.text(cx,ty+8,nh.line1,
+        {fontSize:'10px',fontFamily:'"Press Start 2P",monospace',color:l.labelCol,stroke:'#000',strokeThickness:3}
+      ).setOrigin(0.5,0).setDepth(50))
+
+      this.nameLine2.set(id, this.add.text(cx,ty+24,nh.line2,
+        {fontSize:'7px',fontFamily:'"Press Start 2P",monospace',color:l.labelCol,stroke:'#000',strokeThickness:2}
+      ).setOrigin(0.5,0).setDepth(50))
+
+      this.nameLine3.set(id, this.add.text(cx,ty+36,nh.line3,
+        {fontSize:'6px',fontFamily:'"Press Start 2P",monospace',color:'#888',stroke:'#000',strokeThickness:2}
+      ).setOrigin(0.5,0).setDepth(50))
+
+      this.presLabels.set(id, this.add.text(cx,ty+50,PRESIDENT_NAMES[id]??'',
+        {fontSize:'6px',fontFamily:'"Press Start 2P",monospace',color:'#667788',stroke:'#000',strokeThickness:2}
+      ).setOrigin(0.5,0).setDepth(50))
+
+      this.crimeLabels.set(id, this.add.text(cx,ty+62,'',
+        {fontSize:'7px',fontFamily:'"Press Start 2P",monospace',color:'#ff5544',stroke:'#000',strokeThickness:2}
+      ).setOrigin(0.5,0).setDepth(50))
+
+      this.actionLabels.set(id, this.add.text(cx,ty+l.fh*H-8,'',
+        {fontSize:'7px',fontFamily:'"Press Start 2P",monospace',color:'#ffdd44',stroke:'#000',strokeThickness:3}
+      ).setOrigin(0.5,1).setDepth(50))
+
+      for(let i=0;i<4;i++){
+        this.resIconLbls.set(`${id}_${i}`, this.add.text(0,0,RES_LABEL[i],
+          {fontSize:'6px',fontFamily:'"Press Start 2P",monospace',color:RES_STR[i],stroke:'#000',strokeThickness:2}
+        ).setOrigin(0,0.5).setDepth(55))
+        this.resPctLbls.set(`${id}_${i}`, this.add.text(0,0,'0%',
+          {fontSize:'6px',fontFamily:'"Press Start 2P",monospace',color:RES_STR[i],stroke:'#000',strokeThickness:2}
+        ).setOrigin(1,0.5).setDepth(55))
+      }
+    }
+  }
+
+  private _updateLabels(W:number, H:number){
+    for(const r of this.regions){
+      const l=LAYOUTS[r.id]; if(!l) continue
+      const cx=(l.fx+l.fw/2)*W, ty=l.fy*H, th=l.fh*H
+
+      this.nameLine1.get(r.id)?.setPosition(cx,ty+8)
+      this.nameLine2.get(r.id)?.setPosition(cx,ty+24)
+      this.nameLine3.get(r.id)?.setPosition(cx,ty+36)
+      this.presLabels.get(r.id)?.setPosition(cx,ty+50)
+      this.crimeLabels.get(r.id)?.setPosition(cx,ty+62)
+      this.actionLabels.get(r.id)?.setPosition(cx,ty+th-8)
+
+      const cl=this.crimeLabels.get(r.id)
+      if(cl){
+        cl.setText(`⚠ ${Math.round(r.crime_rate*100)}%  👥${(r.population/1e6).toFixed(1)}M`)
+        cl.setColor(r.crime_rate>0.65?'#ff3322':r.crime_rate>0.4?'#ffaa33':'#55cc55')
+      }
+      const al=this.actionLabels.get(r.id)
+      if(al){
+        const ic:Record<string,string>={Conserve:'[DEF]',Trade:'[TRD]',Expand:'[EXP]',Conflict:'[WAR]'}
+        al.setText(ic[r.last_action]??r.last_action)
+        al.setColor({Conserve:'#44aaff',Trade:'#44ee88',Expand:'#ffcc44',Conflict:'#ff4444'}[r.last_action]??'#fff')
+      }
+
+      // Resource bar label positions
+      const BAR_H=6,BAR_GAP=5,ICON_W=26,VAL_W=22
+      const totalH=4*(BAR_H+BAR_GAP)
+      const startY=ty+th-totalH-10
+      const bX=l.fx*W+8+ICON_W, bW=l.fw*W-16-ICON_W-VAL_W
+      for(let i=0;i<4;i++){
+        const byC=startY+i*(BAR_H+BAR_GAP)+BAR_H/2
+        this.resIconLbls.get(`${r.id}_${i}`)?.setPosition(l.fx*W+8,byC)
+        const val=r.resources[RES_KEYS[i]], pct=Math.round(val*100)
+        const vl=this.resPctLbls.get(`${r.id}_${i}`)
+        if(vl){ vl.setPosition(l.fx*W+l.fw*W-8,byC); vl.setText(`${pct}%`); vl.setColor(val<0.25?'#ff3322':val>0.75?'#aaffcc':RES_STR[i]) }
+      }
+    }
+  }
+
+  // ── Cluster Dynamic Overlays (Drought/Blight) ──────────────────────────────
+
+  private _drawClusterOverlays(W:number, H:number){
+    const g=this.clusterGfx; g.clear()
+    const ct=this.climate?.type
+    if(!ct) return
+    for(const id of Object.keys(LAYOUTS)){
+      const l=LAYOUTS[id]
+      const cx=(l.fx+l.fw/2)*W, cy=(l.fy+l.fh*0.52)*H
+      if(ct==='Drought'){
+        // Sandy brown overlay on ground blocks
+        for(const [col,row,,stacks] of CLUSTERS[id]){
+          const iso=isoToScreen(col,row)
+          const bx=cx+iso.x, by=cy+iso.y-(stacks-1)*TH
+          const pulse=0.25+0.15*Math.sin(this.phase*2+hash(id))
+          drawBlock(g,bx,by,0xcc8833,0x8a5522,0x663311,pulse)
+        }
+      } else if(ct==='Blight' && id==='VERDANTIS'){
+        // Purple mycelium overlay on farmland
+        for(const [col,row,,stacks] of CLUSTERS[id]){
+          const iso=isoToScreen(col,row)
+          const bx=cx+iso.x, by=cy+iso.y-(stacks-1)*TH
+          const pulse=0.3+0.15*Math.sin(this.phase*1.5+hash(id))
+          drawBlock(g,bx,by,0x883399,0x551166,0x330044,pulse)
+        }
+      } else if(ct==='SolarFlare'){
+        // Warm shimmer on ignis
+        const flare=0.1+0.08*Math.sin(this.phase*3)
+        g.fillStyle(0xffaa22,flare); g.fillRect(l.fx*W,l.fy*H,l.fw*W,l.fh*H)
+      }
+    }
+  }
+
+  // ── Trade Beams & Conflict TNT ─────────────────────────────────────────────
+
+  private _drawBeamsAndConflict(W:number, H:number, delta:number){
+    const g=this.beamGfx; g.clear()
+    if(!this.regions.length) return
+
+    const tradeSet=new Set(this.regions.filter(r=>r.last_action==='Trade').map(r=>r.id))
+    const conflictSet=new Set(this.regions.filter(r=>r.last_action==='Conflict').map(r=>r.id))
+
+    const PAIRS:[string,string][]=[
+      ['AQUILONIA','IGNIS_CORE'],['VERDANTIS','IGNIS_CORE'],
+      ['IGNIS_CORE','TERRANOVA'],['IGNIS_CORE','THE_NEXUS'],
+      ['AQUILONIA','TERRANOVA'],['VERDANTIS','THE_NEXUS'],
     ]
 
-    g.lineStyle(12, 0x111118, 1)
-    for (const [a, b] of pairs) g.lineBetween(centers[a].x, centers[a].y, centers[b].x, centers[b].y)
-    g.lineStyle(3, 0x222235, 0.8)
-    for (const [a, b] of pairs) g.lineBetween(centers[a].x, centers[a].y, centers[b].x, centers[b].y)
+    for(const [a,b] of PAIRS){
+      const key=`${a}-${b}`
+      const trading=tradeSet.has(a)||tradeSet.has(b)
+      this.beamAlphas[key]=clamp((this.beamAlphas[key]??0)+(trading?0.07:-0.04),0,1)
+      const alpha=this.beamAlphas[key]; if(alpha<0.02) continue
+
+      const ca=this._regionCenter(a,W,H), cb=this._regionCenter(b,W,H)
+
+      // Beam
+      g.lineStyle(8,0x44ccff,alpha*0.08); g.lineBetween(ca.x,ca.y,cb.x,cb.y)
+      g.lineStyle(2,0x88eeff,alpha*0.4);  g.lineBetween(ca.x,ca.y,cb.x,cb.y)
+      g.lineStyle(1,0xeeffff,alpha*0.9);  g.lineBetween(ca.x,ca.y,cb.x,cb.y)
+
+      // Voxel minecart squares travelling along beam
+      for(let si=0;si<4;si++){
+        const t=((this.phase*0.5+si/4)%1)
+        const mx=lerp(ca.x,cb.x,t), my=lerp(ca.y,cb.y,t)
+        g.fillStyle(0xaa7722,alpha*0.9); g.fillRect(mx-4,my-3,8,5)
+        g.lineStyle(1,0xffcc44,alpha*0.7); g.strokeRect(mx-4,my-3,8,5)
+        g.fillStyle(0xddcc44,alpha); g.fillRect(mx-2,my+2,3,2); g.fillRect(mx+1,my+2,3,2)
+      }
+    }
+
+    // TNT conflict flash on targets
+    for(const id of conflictSet){
+      const l=LAYOUTS[id]
+      // Trigger TNT if not already active
+      if(!this.tntTargets[id]) this.tntTargets[id]=8
+    }
+
+    for(const [id,remaining] of Object.entries(this.tntTargets)){
+      if(remaining<=0){ delete this.tntTargets[id]; continue }
+      const l=LAYOUTS[id]
+      const cx=(l.fx+l.fw/2)*W, cy=(l.fy+l.fh/2)*H
+      const flash=(remaining%2===0)?0.5:0.0
+      g.fillStyle(0xff3300,flash); g.fillRect(l.fx*W,l.fy*H,l.fw*W,l.fh*H)
+      // TNT debris blocks
+      for(let d=0;d<8;d++){
+        const ang=(d/8)*Math.PI*2+(this.phase*4)
+        const dist=(8-remaining)*12
+        g.fillStyle(0xff4422,0.7); g.fillRect(cx+Math.cos(ang)*dist-3,cy+Math.sin(ang)*dist-3,6,6)
+        g.fillStyle(0xffaa44,0.5); g.fillRect(cx+Math.cos(ang)*dist-1,cy+Math.sin(ang)*dist-1,2,2)
+      }
+      this.tntTargets[id]=remaining-1
+      // Spawn explosion particles
+      if(remaining===8) this._spawnExplosion(cx,cy)
+    }
+
+    // Decrement tnt each frame
+    void delta
   }
 
-  private _drawNationTile(id: string, W: number, H: number) {
-    const l = LAYOUTS[id]
-    const x = l.fx * W, y = l.fy * H, w = l.fw * W, h = l.fh * H
-    const g = this.bgGfx
-
-    // Base fill
-    g.fillStyle(l.fill, 1)
-    g.fillRoundedRect(x, y, w, h, 12)
-
-    // Inner accent fill
-    g.fillStyle(l.accentFill, 0.5)
-    g.fillRoundedRect(x + 6, y + 6, w - 12, h - 12, 8)
-
-    // Outer border glow
-    g.lineStyle(2, l.border, 0.9)
-    g.strokeRoundedRect(x, y, w, h, 12)
-    g.lineStyle(10, l.border, 0.08)
-    g.strokeRoundedRect(x - 5, y - 5, w + 10, h + 10, 17)
-
-    // Nation-specific decorations
-    this._drawNationDecorations(id, g, x, y, w, h)
-  }
-
-  private _drawNationDecorations(id: string, g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number) {
-    if (id === 'AQUILONIA') {
-      // Water ripple at bottom
-      g.fillStyle(0x0a2a5c, 0.7)
-      g.fillRoundedRect(x + 6, y + h * 0.7, w - 12, h * 0.27, { bl: 8, br: 8, tl: 0, tr: 0 })
-      // Battlements (top wall details)
-      const bw = 10, bh = 8, gap = 14
-      for (let bx = x + 10; bx < x + w - 10; bx += bw + gap) {
-        g.fillStyle(0x1a3a6c, 0.8); g.fillRect(bx, y + 4, bw, bh)
-      }
-      // Towers at corners
-      const towerPositions = [[x + 8, y + 8], [x + w - 22, y + 8], [x + 8, y + h - 22], [x + w - 22, y + h - 22]]
-      for (const [tx, ty] of towerPositions) {
-        g.fillStyle(0x1e4580, 0.9); g.fillRect(tx, ty, 14, 14)
-        g.lineStyle(1, 0x4A9EFF, 0.5); g.strokeRect(tx, ty, 14, 14)
-      }
-    } else if (id === 'VERDANTIS') {
-      // Dense forest floor
-      const trees = [[0.1,0.4],[0.25,0.32],[0.5,0.28],[0.72,0.38],[0.85,0.45],
-                     [0.15,0.62],[0.4,0.7],[0.65,0.65],[0.88,0.7],[0.55,0.5]]
-      trees.forEach(([tx, ty], i) => {
-        const px = x + tx * w, py = y + ty * h, s = 8 + seededRand(i * 4) * 9
-        g.fillStyle(0x0d3a12, 1); g.fillCircle(px, py + s * 0.4, s * 0.55)
-        g.fillStyle(0x165c1e, 1); g.fillCircle(px, py, s)
-        g.fillStyle(0x20882a, 0.5); g.fillCircle(px - s * 0.3, py - s * 0.3, s * 0.6)
+  private _spawnExplosion(cx:number, cy:number){
+    for(let i=0;i<20;i++){
+      const ang=Math.random()*Math.PI*2
+      const spd=1.5+Math.random()*3
+      this.particles.push({
+        x:cx,y:cy,
+        vx:Math.cos(ang)*spd,vy:Math.sin(ang)*spd,
+        alpha:0.9,r:3+Math.random()*3,
+        color:[0xff4422,0xff8833,0xffcc44,0x884422][Math.floor(Math.random()*4)],
+        life:30+Math.random()*20, square:true,
       })
-      // Farm fields
-      g.fillStyle(0x1a5c20, 0.22)
-      g.fillRect(x + w * 0.3, y + h * 0.55, w * 0.35, h * 0.28)
-      g.lineStyle(1, 0x2a7a2a, 0.3)
-      for (let fy = y + h * 0.55; fy < y + h * 0.83; fy += 8)
-        g.lineBetween(x + w * 0.3, fy, x + w * 0.65, fy)
-    } else if (id === 'IGNIS_CORE') {
-      // Lava cracks
-      g.lineStyle(2, 0xff4400, 0.35)
-      const cracks = [[0.1,0.3,0.4,0.6],[0.5,0.2,0.7,0.5],[0.2,0.7,0.5,0.9],[0.6,0.6,0.9,0.8]]
-      for (const [x1, y1, x2, y2] of cracks)
-        g.lineBetween(x + x1 * w, y + y1 * h, x + x2 * w, y + y2 * h)
-      // Industrial chimneys
-      const chimPos = [[0.15,0.35],[0.45,0.28],[0.75,0.38]]
-      chimPos.forEach(([cx2, cy2]) => {
-        const px = x + cx2 * w, py = y + cy2 * h
-        g.fillStyle(0x2a1208, 1); g.fillRect(px - 6, py - 28, 12, 30)
-        g.lineStyle(1, 0xff7043, 0.4); g.strokeRect(px - 6, py - 28, 12, 30)
-      })
-      // Factory blocks
-      g.fillStyle(0x1c0e06, 1); g.fillRect(x + w * 0.1, y + h * 0.55, w * 0.8, h * 0.28)
-      g.lineStyle(1, 0x663322, 0.4); g.strokeRect(x + w * 0.1, y + h * 0.55, w * 0.8, h * 0.28)
-    } else if (id === 'TERRANOVA') {
-      // Cracked earth texture
-      g.lineStyle(1, 0x604020, 0.5)
-      const terrainLines = [[0.1,0.2,0.6,0.4],[0.3,0.5,0.9,0.7],[0.05,0.65,0.5,0.8],
-                            [0.4,0.2,0.8,0.45],[0.15,0.4,0.7,0.3]]
-      for (const [x1,y1,x2,y2] of terrainLines)
-        g.lineBetween(x+x1*w, y+y1*h, x+x2*w, y+y2*h)
-      // Boulders
-      const boulders = [[0.15,0.35,12],[0.55,0.45,9],[0.8,0.3,14],[0.35,0.7,10],[0.7,0.65,8]]
-      boulders.forEach(([bx, by, bs]) => {
-        g.fillStyle(0x3a2a10, 1); g.fillEllipse(x+bx*w, y+by*h, bs*2.5, bs * 1.5)
-        g.lineStyle(1, 0x604020, 0.8); g.strokeEllipse(x+bx*w, y+by*h, bs*2.5, bs*1.5)
-      })
-      // Skull markers (Parasite territory marks)
-      g.fillStyle(0x664422, 0.6)
-      g.fillTriangle(x+w*0.5, y+h*0.15, x+w*0.45, y+h*0.25, x+w*0.55, y+h*0.25)
-    } else if (id === 'THE_NEXUS') {
-      // Central hub circle
-      const cx3 = x + w / 2, cy3 = y + h / 2
-      g.lineStyle(2, 0xAB7FE0, 0.25)
-      for (let r2 = 20; r2 < 80; r2 += 18) g.strokeCircle(cx3, cy3, r2)
-      // Connecting grid lines
-      g.lineStyle(1, 0x6a4aaa, 0.2)
-      for (let gx = x + 10; gx < x + w; gx += 22) g.lineBetween(gx, y, gx, y + h)
-      for (let gy = y + 10; gy < y + h; gy += 22) g.lineBetween(x, gy, x + w, gy)
-      // Glowing core
-      g.fillStyle(0x3a1a6a, 0.8); g.fillCircle(cx3, cy3, 18)
-      g.lineStyle(2, 0xAB7FE0, 0.6); g.strokeCircle(cx3, cy3, 18)
     }
   }
 
-  // ── Labels ───────────────────────────────────────────────────────────────
+  // ── Particle System ───────────────────────────────────────────────────────
 
-  private _createLabels(W: number, H: number) {
-    for (const id of Object.keys(LAYOUTS)) {
-      const l = LAYOUTS[id]
-      const x = (l.fx + l.fw / 2) * W
-      const y = l.fy * H
+  private _updateParticles(W:number, H:number, delta:number){
+    const g=this.particleGfx; g.clear()
+    const ct=this.climate?.type
 
-      const nameLabel = this.add.text(x, y + 14, NATION_NAMES[id] ?? id, {
-        fontSize: '14px', fontFamily: 'Inter, JetBrains Mono, monospace',
-        color: l.labelCol, stroke: '#000', strokeThickness: 4, fontStyle: 'bold',
-      }).setOrigin(0.5, 0).setDepth(50)
-      this.nameLabels.set(id, nameLabel)
-
-      const presLabel = this.add.text(x, y + 33, PRESIDENT_NAMES[id] ?? '', {
-        fontSize: '10px', fontFamily: 'Inter, monospace',
-        color: '#888899', stroke: '#000', strokeThickness: 3,
-      }).setOrigin(0.5, 0).setDepth(50)
-      this.presidentLabels.set(id, presLabel)
-
-      const crimeLabel = this.add.text(x, y + 48, '', {
-        fontSize: '10px', fontFamily: 'JetBrains Mono, monospace',
-        color: '#ff6655', stroke: '#000', strokeThickness: 3,
-      }).setOrigin(0.5, 0).setDepth(50)
-      this.crimeLabels.set(id, crimeLabel)
-
-      const actionLabel = this.add.text(x, y + h(l, H) - 22, '', {
-        fontSize: '11px', fontFamily: 'Inter, monospace',
-        color: '#ffeeaa', stroke: '#000000', strokeThickness: 4,
-      }).setOrigin(0.5, 1).setDepth(50)
-      this.actionLabels.set(id, actionLabel)
+    // Climate weather particles
+    if(ct&&this.particles.filter(p=>!p.square).length<120){
+      const count=ct==='Drought'?2:ct==='SolarFlare'?3:2
+      for(let i=0;i<count;i++) this._spawnWeatherParticle(ct,W,H)
     }
 
-    function h(l: NLayout, H: number) { return l.fh * H }
-  }
-
-  private _updateLabels(W: number, H: number) {
-    for (const r of this.regions) {
-      const l = LAYOUTS[r.id]
-      if (!l) continue
-      const cx = (l.fx + l.fw / 2) * W
-      const ty = l.fy * H
-
-      this.nameLabels.get(r.id)?.setPosition(cx, ty + 14)
-      this.presidentLabels.get(r.id)?.setPosition(cx, ty + 33)
-      this.crimeLabels.get(r.id)?.setPosition(cx, ty + 48)
-      this.actionLabels.get(r.id)?.setPosition(cx, ty + l.fh * H - 22)
-
-      const cLabel = this.crimeLabels.get(r.id)
-      if (cLabel) {
-        const pct = Math.round(r.crime_rate * 100)
-        cLabel.setText(`⚠ ${pct}% crime   pop ${(r.population / 1_000_000).toFixed(1)}M`)
-        cLabel.setColor(r.crime_rate > 0.65 ? '#ff4444' : r.crime_rate > 0.4 ? '#ffaa44' : '#66cc66')
-      }
-
-      const aLabel = this.actionLabels.get(r.id)
-      if (aLabel) {
-        const icons: Record<string, string> = { Conserve:'🛡️', Trade:'🤝', Expand:'⬆️', Conflict:'⚔️' }
-        aLabel.setText(`${icons[r.last_action] ?? ''}  ${r.last_action}`)
-        const actionColors: Record<string, string> = {
-          Conserve: '#88cce8', Trade: '#66ee88', Expand: '#ffcc44', Conflict: '#ff5555'
-        }
-        aLabel.setColor(actionColors[r.last_action] ?? '#ffffff')
-      }
+    this.particles=this.particles.filter(p=>p.life>0)
+    for(const p of this.particles){
+      p.x+=p.vx*(delta*0.06); p.y+=p.vy*(delta*0.06)
+      p.alpha-=0.003+(p.square?0.012:0); p.life-=delta*0.06*1.5
+      const a=Math.max(0,p.alpha)
+      g.fillStyle(p.color,a)
+      if(p.square) g.fillRect(p.x-p.r,p.y-p.r,p.r*2,p.r*2)
+      else         g.fillCircle(p.x,p.y,p.r)
     }
+    if(!ct) this.particles=this.particles.filter(p=>p.square&&p.life>0 || p.life>0&&p.life<20)
+
+    // Global climate overlays
+    if(ct==='SolarFlare'){ g.fillStyle(0xffdd44,0.04+0.03*Math.sin(this.phase*4)); g.fillRect(0,0,W,H) }
+    if(ct==='Drought')   { g.fillStyle(0xcc7722,0.05+0.02*Math.sin(this.phase*2)); g.fillRect(0,0,W,H) }
+    if(ct==='Blight')    { g.fillStyle(0x441166,0.06+0.02*Math.sin(this.phase*1.5)); g.fillRect(0,0,W,H) }
   }
 
-  // ── Dynamic overlays ─────────────────────────────────────────────────────
-
-  private _drawDynamic(W: number, H: number) {
-    const g = this.dynGfx; g.clear()
-
-    for (const r of this.regions) {
-      const l = LAYOUTS[r.id]; if (!l) continue
-      const x = l.fx * W, y = l.fy * H, w = l.fw * W, h2 = l.fh * H
-      const cx = x + w / 2, cy = y + h2 / 2
-
-      // ── Crime Pulse (red breathing halo) ────────────────────────────────
-      if (r.crime_rate > 0.45) {
-        const intensity = clamp((r.crime_rate - 0.45) / 0.55, 0, 1)
-        const pulse = 0.4 + 0.6 * Math.abs(Math.sin(this.phase * 3.5 + hash(r.id)))
-        const alpha = intensity * pulse * 0.45
-        const radius = 20 + intensity * 60 + pulse * 15
-        g.fillStyle(0xff2200, alpha * 0.35); g.fillCircle(cx, cy, radius * 1.3)
-        g.lineStyle(3, 0xff3300, alpha); g.strokeCircle(cx, cy, radius)
-        g.lineStyle(1, 0xff6644, alpha * 0.6); g.strokeCircle(cx - 1, cy - 1, radius * 1.15)
-      }
-
-      // ── Nation-specific micro-animations ────────────────────────────────
-      if (r.id === 'AQUILONIA') {
-        // Water shimmer
-        const waterY = y + h2 * 0.75
-        g.lineStyle(2, 0x4A9EFF, 0.4)
-        for (let wi = 0; wi < 4; wi++) {
-          const wy = waterY + wi * 7
-          for (let xi = x + 12; xi < x + w - 12; xi += 22) {
-            const yo = Math.sin((xi * 0.09) + this.phase * 2.8 + wi) * 3
-            g.lineBetween(xi, wy + yo, xi + 11, wy - yo)
-          }
-        }
-      } else if (r.id === 'IGNIS_CORE') {
-        // Heat distortion shimmer (orange flicker lines)
-        g.lineStyle(1, 0xFF7043, 0.2)
-        for (let hi = 0; hi < 6; hi++) {
-          const hx = x + (0.1 + seededRand(hi) * 0.8) * w
-          const hy1 = y + h2 * 0.5 + Math.sin(this.phase * 4 + hi * 1.5) * 8
-          const hy2 = hy1 - 20 - seededRand(this.phase + hi) * 12
-          g.lineBetween(hx, hy1, hx + Math.sin(this.phase * 3 + hi) * 6, hy2)
-        }
-        // Lava pulse
-        const lavaPulse = 0.15 + 0.1 * Math.sin(this.phase * 2)
-        g.fillStyle(0xff4400, lavaPulse)
-        g.fillRoundedRect(x + 4, y + h2 * 0.55 - 4, w - 8, h2 * 0.28 + 4, 6)
-      } else if (r.id === 'VERDANTIS') {
-        // Wind ripple across fields
-        g.lineStyle(1, 0x4CAF50, 0.18)
-        for (let fi = 0; fi < 5; fi++) {
-          const fy2 = y + h2 * 0.6 + fi * 10
-          const fphase = this.phase * 1.5 + fi * 0.6
-          for (let fx2 = x + w * 0.3; fx2 < x + w * 0.65; fx2 += 12) {
-            const fy3 = fy2 + Math.sin(fphase + fx2 * 0.1) * 2.5
-            g.lineBetween(fx2, fy3, fx2 + 5, fy3 - 3)
-          }
-        }
-      } else if (r.id === 'TERRANOVA') {
-        // Cracking earth — dark fissures pulse
-        const crackIntensity = 0.1 + r.crime_rate * 0.2
-        g.lineStyle(2, 0x301810, crackIntensity + 0.05 * Math.sin(this.phase * 1.5))
-        g.lineBetween(x + w * 0.2, y + h2 * 0.35, x + w * 0.7, y + h2 * 0.55)
-        g.lineBetween(x + w * 0.4, y + h2 * 0.2, x + w * 0.65, y + h2 * 0.72)
-      } else if (r.id === 'THE_NEXUS') {
-        // Orbiting signal rings
-        for (let oi = 0; oi < 3; oi++) {
-          const orbitR = 30 + oi * 22
-          const orbitPhase = this.phase * (1.2 - oi * 0.25) + oi * 2.1
-          const ox = cx + Math.cos(orbitPhase) * orbitR
-          const oy = cy + Math.sin(orbitPhase) * orbitR * 0.55
-          g.fillStyle(0xAB7FE0, 0.6 - oi * 0.15); g.fillCircle(ox, oy, 4 - oi * 0.8)
-        }
-        // Nexus core pulse
-        const nexusPulse = 0.3 + 0.3 * Math.sin(this.phase * 2.5)
-        g.fillStyle(0xAB7FE0, nexusPulse); g.fillCircle(cx, cy, 14)
-      }
-    }
-  }
-
-  // ── Energy Beams ─────────────────────────────────────────────────────────
-
-  private _drawBeams(W: number, H: number) {
-    const g = this.beamGfx; g.clear()
-    if (this.regions.length === 0) return
-
-    // Build a set of trading nations
-    const tradeSet = new Set(
-      this.regions.filter(r => r.last_action === 'Trade').map(r => r.id)
+  private _spawnWeatherParticle(type:string, W:number, H:number){
+    const x=Math.random()*W
+    this.particles.push(type==='Drought'
+      ? {x,y:Math.random()*H*0.5, vx:2+Math.random()*1.5,vy:0.3+Math.random()*0.5,alpha:0.5,r:2,color:0xcc8833,life:80+Math.random()*60}
+      : type==='SolarFlare'
+      ? {x,y:-4, vx:(Math.random()-0.5)*1.5,vy:2+Math.random()*2,alpha:0.7,r:2,color:0xffee88,life:50+Math.random()*40}
+      : {x,y:-4, vx:(Math.random()-0.5)*0.8,vy:1.2+Math.random()*1.5,alpha:0.5,r:3,color:0x882299,life:90+Math.random()*50,square:true}
     )
+  }
 
-    const pairs: [string, string][] = [
-      ['AQUILONIA',  'IGNIS_CORE'], ['VERDANTIS', 'IGNIS_CORE'],
-      ['IGNIS_CORE', 'TERRANOVA'], ['IGNIS_CORE', 'THE_NEXUS'],
-      ['AQUILONIA',  'TERRANOVA'], ['VERDANTIS',  'THE_NEXUS'],
-    ]
+  // ── Resource Bars ──────────────────────────────────────────────────────────
 
-    for (const [a, b] of pairs) {
-      const key = `${a}-${b}`
-      const bothTrading = tradeSet.has(a) && tradeSet.has(b)
+  private _drawResourceBars(W:number, H:number){
+    const g=this.resBarGfx; g.clear()
+    if(!this.regions.length) return
 
-      // Ease the beam in/out
-      const current = this.beamAlphas[key] ?? 0
-      this.beamAlphas[key] = clamp(current + (bothTrading ? 0.06 : -0.04), 0, 1)
-      const alpha = this.beamAlphas[key]
-      if (alpha < 0.02) continue
+    for(const r of this.regions){
+      const l=LAYOUTS[r.id]; if(!l) continue
+      const tx=l.fx*W, ty=l.fy*H, tw=l.fw*W, th=l.fh*H
+      const BAR_H=6,BAR_GAP=5,ICON_W=26,VAL_W=22
+      const totalH=4*(BAR_H+BAR_GAP)
+      const startY=ty+th-totalH-10
+      const barX=tx+8+ICON_W, barW=tw-16-ICON_W-VAL_W
 
-      const ca = this._center(a, W, H), cb = this._center(b, W, H)
+      // Minecraft inventory-style panel background
+      g.fillStyle(0x373737,0.9); g.fillRect(tx+4,startY-5,tw-8,totalH+10)
+      g.lineStyle(2,0x1a1a1a,1); g.strokeRect(tx+4,startY-5,tw-8,totalH+10)
+      g.lineStyle(1,0x555555,0.8); g.strokeRect(tx+5,startY-4,tw-10,totalH+8)
 
-      // Beam glow layers
-      g.lineStyle(12, 0x66aaff, alpha * 0.08)
-      g.lineBetween(ca.x, ca.y, cb.x, cb.y)
-      g.lineStyle(4, 0x88ccff, alpha * 0.25)
-      g.lineBetween(ca.x, ca.y, cb.x, cb.y)
-      g.lineStyle(1.5, 0xeeffff, alpha * 0.8)
-      g.lineBetween(ca.x, ca.y, cb.x, cb.y)
+      for(let i=0;i<4;i++){
+        const by=startY+i*(BAR_H+BAR_GAP)
+        const val=r.resources[RES_KEYS[i]]
+        const fillW=Math.max(0,val*barW)
+        const fillCol=val<0.25?0xff2200:val<0.4?0xcc5500:RES_COLS[i]
 
-      // Sparkle particles along the beam
-      const numSparks = 6
-      for (let si = 0; si < numSparks; si++) {
-        const t = ((this.phase * 0.8 + si / numSparks) % 1)
-        const sx = lerp(ca.x, cb.x, t)
-        const sy = lerp(ca.y, cb.y, t)
-        g.fillStyle(0xaaddff, alpha * (0.5 + 0.5 * Math.sin(this.phase * 8 + si)))
-        g.fillCircle(sx, sy, 3)
+        // Slot background (mc-slot style)
+        g.fillStyle(0x8b8b8b,0.4); g.fillRect(barX,by,barW,BAR_H)
+        g.lineStyle(1,0x373737,0.8); g.strokeRect(barX,by,barW,BAR_H)
+
+        // Fill (segmented pixel art look)
+        if(fillW>0){
+          g.fillStyle(fillCol,0.95); g.fillRect(barX,by,fillW,BAR_H)
+          // Pixel highlight top
+          g.fillStyle(0xffffff,0.15); g.fillRect(barX,by,fillW,2)
+        }
+        // Critical warning
+        if(val<0.22){
+          g.lineStyle(1,0xff2200,0.5+0.5*Math.sin(this.phase*8))
+          g.strokeRect(barX-1,by-1,barW+2,BAR_H+2)
+        }
+        // Abundance glow
+        if(val>0.75){
+          g.lineStyle(1,RES_COLS[i],0.35); g.strokeRect(barX,by,fillW,BAR_H)
+        }
       }
     }
   }
 
-  // ── Climate Particles ─────────────────────────────────────────────────────
+  // ── Crime Halos & Dominance Rings ─────────────────────────────────────────
 
-  private _drawParticles(W: number, H: number, delta: number) {
-    const g = this.particleGfx; g.clear()
-    const ct = this.climate?.type
+  private _drawOverlays(W:number, H:number){
+    const g=this.overlayGfx; g.clear()
+    for(const r of this.regions){
+      const l=LAYOUTS[r.id]; if(!l) continue
+      const cx=(l.fx+l.fw/2)*W, cy=(l.fy+l.fh/2)*H
 
-    // Spawn new particles based on climate
-    if (ct && this.particles.length < 150) {
-      const count = ct === 'Drought' ? 2 : ct === 'SolarFlare' ? 3 : 2
-      for (let i = 0; i < count; i++) this._spawnClimateParticle(ct, W, H)
-    }
-
-    // Update and draw
-    this.particles = this.particles.filter(p => p.life > 0)
-    for (const p of this.particles) {
-      p.x += p.vx * delta * 0.06
-      p.y += p.vy * delta * 0.06
-      p.alpha -= 0.003
-      p.life -= delta * 0.06
-
-      g.fillStyle(p.color, Math.max(0, p.alpha))
-      g.fillCircle(p.x, p.y, p.r)
-    }
-
-    // Clear particles when no climate event
-    if (!ct) this.particles = this.particles.filter(p => p.life > 0 && p.life < 20)
-
-    // Solar Flare overlay
-    if (ct === 'SolarFlare') {
-      const flareAlpha = 0.05 + 0.04 * Math.sin(this.phase * 4)
-      g.fillStyle(0xffdd44, flareAlpha)
-      g.fillRect(0, 0, W, H)
-      // Burst rays from top
-      g.lineStyle(3, 0xffee88, 0.15)
-      for (let ri = 0; ri < 12; ri++) {
-        const ang = (ri / 12) * Math.PI + this.phase * 0.3
-        g.lineBetween(W / 2, -20, W / 2 + Math.cos(ang) * 600, Math.sin(ang) * 600)
+      // Crime: red square "danger zone" around region
+      if(r.crime_rate>0.45){
+        const intensity=clamp((r.crime_rate-0.45)/0.55,0,1)
+        const pulse=0.4+0.6*Math.abs(Math.sin(this.phase*3+hash(r.id)))
+        const sz=30+intensity*50+pulse*15
+        g.lineStyle(3,0xff2200,intensity*pulse*0.7); g.strokeRect(cx-sz,cy-sz,sz*2,sz*2)
+        g.fillStyle(0xff2200,intensity*pulse*0.06); g.fillRect(cx-sz,cy-sz,sz*2,sz*2)
       }
-    }
 
-    // Drought overlay
-    if (ct === 'Drought') {
-      g.fillStyle(0x884400, 0.06 + 0.03 * Math.sin(this.phase * 2))
-      g.fillRect(0, 0, W, H)
-    }
-
-    // Blight overlay
-    if (ct === 'Blight') {
-      g.fillStyle(0x334400, 0.07 + 0.02 * Math.sin(this.phase * 1.5))
-      g.fillRect(0, 0, W, H)
-    }
-  }
-
-  private _spawnClimateParticle(type: string, W: number, H: number) {
-    const x = Math.random() * W
-    let p: Particle
-    if (type === 'Drought') {
-      // Orange-yellow dust motes drifting across
-      p = { x, y: Math.random() * H * 0.5,
-        vx: 1.5 + Math.random() * 1.5, vy: 0.2 + Math.random() * 0.5,
-        alpha: 0.5 + Math.random() * 0.3, r: 1.5 + Math.random() * 2,
-        color: 0xcc8833, life: 80 + Math.random() * 60 }
-    } else if (type === 'SolarFlare') {
-      // White-gold sparks from above
-      p = { x, y: -5,
-        vx: (Math.random() - 0.5) * 1.5, vy: 2 + Math.random() * 2.5,
-        alpha: 0.7 + Math.random() * 0.3, r: 1 + Math.random() * 2.5,
-        color: 0xffee88, life: 50 + Math.random() * 40 }
-    } else {
-      // Blight: dark brown spores falling
-      p = { x, y: -5,
-        vx: (Math.random() - 0.5) * 0.8, vy: 1.2 + Math.random() * 1.5,
-        alpha: 0.4 + Math.random() * 0.4, r: 2 + Math.random() * 3,
-        color: 0x554422, life: 90 + Math.random() * 50 }
-    }
-    this.particles.push(p)
-  }
-
-  // ── President Sprites ────────────────────────────────────────────────────
-
-  private _drawPresidents(W: number, H: number) {
-    const g = this.presidentGfx; g.clear()
-
-    for (const r of this.regions) {
-      const l = LAYOUTS[r.id]; if (!l) continue
-      const cx = (l.fx + l.fw / 2) * W
-      const cy = (l.fy + l.fh * 0.54) * H  // slightly below center
-      const action = r.last_action
-      const col = parseInt(r.color_hint.replace('#', '0x')) || 0xffffff
-      const breathe = 1 + 0.04 * Math.sin(this.phase * 2 + hash(r.id))
-
-      // Shadow
-      g.fillStyle(0x000000, 0.2); g.fillEllipse(cx, cy + 15, 30, 8)
-
-      // Body (circle, color = nation color)
-      g.fillStyle(col, 0.9); g.fillCircle(cx, cy, 12 * breathe)
-      g.lineStyle(2, 0xffffff, 0.5); g.strokeCircle(cx, cy, 12 * breathe)
-
-      // Head
-      g.fillStyle(0xffd0a0, 1); g.fillCircle(cx, cy - 16, 7)
-
-      // Action icon drawn as graphics shape
-      this._drawActionIcon(g, cx, cy, action, col)
-    }
-  }
-
-  private _drawActionIcon(g: Phaser.GameObjects.Graphics, cx: number, cy: number, action: string, col: number) {
-    const iconY = cy - 34
-    const pulse = 0.7 + 0.3 * Math.abs(Math.sin(this.phase * 3))
-
-    if (action === 'Conserve') {
-      // Shield shape
-      g.fillStyle(0x4488ff, 0.8 * pulse)
-      g.fillTriangle(cx - 8, iconY, cx + 8, iconY, cx, iconY + 14)
-      g.lineStyle(2, 0x88aaff, 0.9); g.strokeTriangle(cx - 8, iconY, cx + 8, iconY, cx, iconY + 14)
-    } else if (action === 'Trade') {
-      // Exchange arrows
-      g.lineStyle(3, 0x44ee88, 0.9 * pulse)
-      g.lineBetween(cx - 10, iconY + 4, cx + 10, iconY + 4)
-      g.lineBetween(cx - 10, iconY + 10, cx + 10, iconY + 10)
-      // Arrow heads
-      g.fillStyle(0x44ee88, 0.9)
-      g.fillTriangle(cx + 8, iconY + 1, cx + 12, iconY + 4, cx + 8, iconY + 7)
-      g.fillTriangle(cx - 8, iconY + 7, cx - 12, iconY + 10, cx - 8, iconY + 13)
-    } else if (action === 'Expand') {
-      // Outward burst / star
-      g.lineStyle(2, 0xffcc44, 0.9 * pulse)
-      for (let i = 0; i < 6; i++) {
-        const ang = (i / 6) * Math.PI * 2 + this.phase * 1.5
-        g.lineBetween(cx, iconY + 7, cx + Math.cos(ang) * 11, iconY + 7 + Math.sin(ang) * 10)
+      // Dominance: signature resource glow
+      const SIG: Record<string,{k:keyof RegionState['resources'];col:number;th:number}> = {
+        AQUILONIA:{k:'water',col:0x2aafcc,th:0.65},VERDANTIS:{k:'food',col:0x7acc55,th:0.65},
+        IGNIS_CORE:{k:'energy',col:0xff7722,th:0.65},TERRANOVA:{k:'land',col:0xaaaaaa,th:0.65},
+        THE_NEXUS:{k:'water',col:0xffee66,th:0.55},
       }
-      g.fillStyle(0xffcc44, 0.8); g.fillCircle(cx, iconY + 7, 4)
-    } else if (action === 'Conflict') {
-      // X / crossed swords
-      const sw = 9
-      g.lineStyle(3, 0xff3333, 1.0 * pulse)
-      g.lineBetween(cx - sw, iconY, cx + sw, iconY + 14)
-      g.lineBetween(cx + sw, iconY, cx - sw, iconY + 14)
-      // Red glow
-      g.fillStyle(0xff1111, 0.15 * pulse); g.fillCircle(cx, iconY + 7, 14)
+      const sig=SIG[r.id]; if(!sig) continue
+      const val=r.resources[sig.k]; if(val<sig.th) continue
+      const strength=clamp((val-sig.th)/(1-sig.th),0,1)
+      const pulse=0.5+0.5*Math.sin(this.phase*1.8+hash(r.id))
+      const sz=60+strength*25+pulse*10
+      g.lineStyle(2,sig.col,strength*pulse*0.5); g.strokeRect(cx-sz/2,cy-sz/2,sz,sz)
+      g.lineStyle(6,sig.col,strength*pulse*0.1); g.strokeRect(cx-sz/2-4,cy-sz/2-4,sz+8,sz+8)
     }
-
-    void col  // reserved for future nation-tinted icons
   }
 
-  // ── Resize ───────────────────────────────────────────────────────────────
+  // ── Resize ─────────────────────────────────────────────────────────────────
 
-  private _onResize(W: number, H: number) {
+  private _onResize(W:number, H:number){
     this.bgGfx.clear()
-    this.nameLabels.forEach(l => l.destroy()); this.nameLabels.clear()
-    this.crimeLabels.forEach(l => l.destroy()); this.crimeLabels.clear()
-    this.actionLabels.forEach(l => l.destroy()); this.actionLabels.clear()
-    this.presidentLabels.forEach(l => l.destroy()); this.presidentLabels.clear()
-    this.particles = []
-    this._drawBackground(W, H)
-    this._createLabels(W, H)
+    ;[this.nameLine1,this.nameLine2,this.nameLine3,this.presLabels,
+      this.crimeLabels,this.actionLabels,this.resIconLbls,this.resPctLbls
+    ].forEach(m=>{ m.forEach(t=>t.destroy()); m.clear() })
+    this.particles=[]
+    this._drawVoxelScene(W,H)
+    this._createLabels(W,H)
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
-  private _center(id: string, W: number, H: number) {
-    const l = LAYOUTS[id]
-    return { x: (l.fx + l.fw / 2) * W, y: (l.fy + l.fh / 2) * H }
+  private _regionCenter(id:string,W:number,H:number){
+    const l=LAYOUTS[id]
+    return {x:(l.fx+l.fw/2)*W, y:(l.fy+l.fh/2)*H}
   }
-}
-
-function hash(s: string): number {
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0
-  return Math.abs(h) % 100
 }

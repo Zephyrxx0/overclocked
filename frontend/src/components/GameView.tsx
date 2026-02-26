@@ -25,5 +25,5 @@ export default function GameView() {
     sceneRef.current?.setRunning(isRunning)
   }, [isRunning])
 
-  return <div id="phaser-container" className="w-full h-full" style={{ background:'#0d1117' }} />
+  return <div id="phaser-container" style={{ width:'100%', height:'100%', background:'#020508' }} />
 }

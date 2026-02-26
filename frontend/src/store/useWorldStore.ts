@@ -36,6 +36,9 @@ interface WorldStore {
   toggleRunning: () => void
 }
 
+// Module-level WS ref — prevents duplicate connections across React StrictMode double-invocations
+let _ws: WebSocket | null = null
+
 export const useWorldStore = create<WorldStore>((set, get) => ({
   tick: 0,
   regions: [],
@@ -45,16 +48,26 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   history: [],
 
   connect() {
-    if (get().connected) return
-    // Try new endpoint first, fall back to legacy /ws
-    const ws = new WebSocket('ws://localhost:8000/ws/world-state')
-    ws.onopen = () => set({ connected: true })
-    ws.onclose = () => {
+    // Already have a live connection — skip
+    if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return
+
+    _ws = new WebSocket('ws://localhost:8000/ws/world-state')
+
+    _ws.onopen = () => set({ connected: true })
+
+    _ws.onclose = () => {
       set({ connected: false })
+      _ws = null
+      // Reconnect after 2 s
       setTimeout(() => get().connect(), 2000)
     }
-    ws.onerror = () => ws.close()
-    ws.onmessage = (e: MessageEvent) => {
+
+    _ws.onerror = () => {
+      _ws?.close()
+      _ws = null
+    }
+
+    _ws.onmessage = (e: MessageEvent) => {
       try {
         const data: {
           tick: number
@@ -62,9 +75,10 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
           climate_event: ClimateEvent
         } = JSON.parse(e.data)
 
+        // Build history entry: crime + energy per nation
         const entry: Record<string, number> = { tick: data.tick }
         for (const r of data.regions) {
-          entry[r.id + '_crime'] = r.crime_rate
+          entry[r.id + '_crime']  = r.crime_rate
           entry[r.id + '_energy'] = r.resources.energy
         }
 
@@ -72,9 +86,9 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
           tick: data.tick,
           regions: data.regions,
           climateEvent: data.climate_event ?? { type: null, duration_remaining: 0 },
-          history: [...s.history.slice(-79), entry as WorldStore['history'][number]],
+          history: [...s.history.slice(-99), entry as WorldStore['history'][number]],
         }))
-      } catch { /* ignore malformed */ }
+      } catch { /* ignore malformed frame */ }
     }
   },
 
@@ -86,7 +100,7 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: running ? 'start' : 'stop' }),
       })
-    } catch { /* offline */ }
+    } catch { /* backend offline — still toggle local state */ }
     set({ isRunning: running })
   },
 }))

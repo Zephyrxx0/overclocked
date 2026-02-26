@@ -1,65 +1,101 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&family=Press+Start+2P&display=swap");
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-html,
-body,
-#root {
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-}
+html, body, #root { height: 100%; width: 100%; overflow: hidden; }
 
 body {
-  font-family: "Inter", sans-serif;
-  background: #030712;
-  color: #f1f5f9;
+  font-family: "Inter", system-ui, sans-serif;
+  background: #1a1a1a;
+  color: #c0c8d8;
+  image-rendering: pixelated;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 4px;
-}
-::-webkit-scrollbar-track {
-  background: #0f172a;
-}
-::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 2px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #2a2a2a; }
+::-webkit-scrollbar-thumb { background: #555; border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: #888; }
+
+/* ── Minecraft Inventory Panel ─────────────────────────────────────────────── */
+.mc-panel {
+  background: #c6c6c6;
+  border-top: 3px solid #fff;
+  border-left: 3px solid #fff;
+  border-right: 3px solid #555;
+  border-bottom: 3px solid #555;
+  image-rendering: pixelated;
 }
 
-/* Glassy card  */
-.glass {
-  background: rgba(15, 23, 42, 0.7);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(100, 116, 139, 0.2);
+.mc-panel-dark {
+  background: #373737;
+  border-top: 3px solid #555;
+  border-left: 3px solid #555;
+  border-right: 3px solid #000;
+  border-bottom: 3px solid #000;
 }
 
-/* Pulse badge */
-@keyframes pulse-ring {
-  0% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(2);
-    opacity: 0;
-  }
+.mc-slot {
+  background: #8b8b8b;
+  border-top: 2px solid #373737;
+  border-left: 2px solid #373737;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
 }
-.pulse-ring::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 9999px;
-  background: currentColor;
-  animation: pulse-ring 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+
+/* ── Voxel Button ──────────────────────────────────────────────────────────── */
+.mc-btn {
+  display: inline-block;
+  cursor: pointer;
+  user-select: none;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 8px;
+  color: #ffffa0;
+  text-shadow: 2px 2px #555;
+  background: #5a5a5a;
+  border-top: 3px solid #9a9a9a;
+  border-left: 3px solid #9a9a9a;
+  border-right: 3px solid #1a1a1a;
+  border-bottom: 3px solid #1a1a1a;
+  padding: 6px 10px;
+  transition: filter 0.05s;
+}
+.mc-btn:hover { filter: brightness(1.15); }
+.mc-btn:active {
+  border-top: 3px solid #1a1a1a;
+  border-left: 3px solid #1a1a1a;
+  border-right: 3px solid #9a9a9a;
+  border-bottom: 3px solid #9a9a9a;
+  transform: translate(1px, 1px);
+}
+
+.mc-btn-green  { background:#2a6a2a; border-color:#4aaa4a #0a2a0a #0a2a0a #4aaa4a; }
+.mc-btn-red    { background:#6a2a2a; border-color:#aa4a4a #2a0a0a #2a0a0a #aa4a4a; }
+.mc-btn-blue   { background:#2a3a6a; border-color:#4a6aaa #0a1a2a #0a1a2a #4a6aaa; }
+
+/* ── Minecraft Title Font ──────────────────────────────────────────────────── */
+.mc-title { font-family: 'Press Start 2P', monospace; }
+.mc-label { font-family: 'Press Start 2P', monospace; font-size: 7px; }
+
+/* ── Resource bar ──────────────────────────────────────────────────────────── */
+.mc-bar-track {
+  height: 8px;
+  background: #373737;
+  border-top: 2px solid #1a1a1a;
+  border-left: 2px solid #1a1a1a;
+  border-right: 2px solid #555;
+  border-bottom: 2px solid #555;
+  overflow: hidden;
+  image-rendering: pixelated;
+}
+.mc-bar-fill { height: 100%; image-rendering: pixelated; transition: width 0.4s steps(10); }
+
+/* ── Animations ────────────────────────────────────────────────────────────── */
+@keyframes mc-pulse {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+@keyframes blink {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.4; }
 }

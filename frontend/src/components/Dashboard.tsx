@@ -3,148 +3,202 @@ import { useWorldStore, RegionState, ClimateEvent } from '../store/useWorldStore
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 // ── Nation config ─────────────────────────────────────────────────────────────
-const NATION_META: Record<string, { flag: string; strategy: string; tribe: string; color: string; bg: string }> = {
-  AQUILONIA:  { flag:'🛡️', strategy:'Fortress',      tribe:'IRON',  color:'#4A9EFF', bg:'rgba(74,158,255,0.07)' },
-  VERDANTIS:  { flag:'🌿', strategy:'Equilibrium',   tribe:'LEAF',  color:'#4CAF50', bg:'rgba(76,175,80,0.07)'  },
-  IGNIS_CORE: { flag:'🔥', strategy:'Expansionist',  tribe:'FIRE',  color:'#FF7043', bg:'rgba(255,112,67,0.07)' },
-  TERRANOVA:  { flag:'⚔️', strategy:'Parasite',      tribe:'IRON',  color:'#A08040', bg:'rgba(160,128,64,0.07)' },
-  THE_NEXUS:  { flag:'🔮', strategy:'Collaborator',  tribe:'NEXUS', color:'#AB7FE0', bg:'rgba(171,127,224,0.07)'},
+const NATION_META: Record<string, {
+  emoji:string; tag:string; specialty:string; tribe:string
+  color:string; slotBg:string; slotBorder:string
+  signatureResource:string; scarceResource:string
+}> = {
+  AQUILONIA:  { emoji:'💧', tag:'Water Dominance',   specialty:'Hoard & Defend',    tribe:'IRON',  color:'#2aafcc', slotBg:'#0a2030', slotBorder:'#2aafcc', signatureResource:'water',  scarceResource:'energy' },
+  VERDANTIS:  { emoji:'🌾', tag:'Food Surplus',      specialty:'Balance All 4',     tribe:'LEAF',  color:'#7acc55', slotBg:'#0a1e08', slotBorder:'#7acc55', signatureResource:'food',   scarceResource:'water'  },
+  IGNIS_CORE: { emoji:'⚡', tag:'Energy Powerhouse', specialty:'Expand & Burn',     tribe:'FIRE',  color:'#ff7722', slotBg:'#1e0a02', slotBorder:'#ff7722', signatureResource:'energy', scarceResource:'food'   },
+  TERRANOVA:  { emoji:'🪨', tag:'Vast Landmass',     specialty:'Conflict & Steal',  tribe:'IRON',  color:'#aaaaaa', slotBg:'#141414', slotBorder:'#aaaaaa', signatureResource:'land',   scarceResource:'water'  },
+  THE_NEXUS:  { emoji:'⚖️', tag:'Balanced Hub',      specialty:'Trade & Stability', tribe:'NEXUS', color:'#ffee66', slotBg:'#1a1608', slotBorder:'#ffee66', signatureResource:'water',  scarceResource:'land'   },
 }
 
-const ACTION_COLORS: Record<string, string> = {
-  Conserve: '#4fc3f7', Trade: '#66ee88', Expand: '#ffcc44', Conflict: '#ff5555'
-}
-const ACTION_ICONS: Record<string, string> = {
-  Conserve: '🛡️', Trade: '🤝', Expand: '⬆️', Conflict: '⚔️'
+const ACTION_COLORS: Record<string,string> = { Conserve:'#44aaff', Trade:'#44ee88', Expand:'#ffcc44', Conflict:'#ff5544' }
+const ACTION_ICONS:  Record<string,string> = { Conserve:'[DEF]',   Trade:'[TRD]',   Expand:'[EXP]',  Conflict:'[WAR]'   }
+
+const CLIMATE_META: Record<string,{icon:string;label:string;color:string;bg:string}> = {
+  Drought:    { icon:'☀️', label:'DROUGHT',     color:'#ffaa33', bg:'#2a1200' },
+  SolarFlare: { icon:'⚡', label:'SOLAR FLARE', color:'#ffee44', bg:'#1a1000' },
+  Blight:     { icon:'☣️', label:'BLIGHT',      color:'#cc44ff', bg:'#1a0022' },
 }
 
-const CLIMATE_META: Record<string, { icon: string; label: string; color: string; bg: string }> = {
-  Drought:    { icon: '☀️', label: 'DROUGHT',     color: '#ff9944', bg: 'rgba(180,80,0,0.25)'   },
-  SolarFlare: { icon: '⚡', label: 'SOLAR FLARE', color: '#ffee44', bg: 'rgba(160,120,0,0.25)'  },
-  Blight:     { icon: '🍂', label: 'BLIGHT',      color: '#88bb44', bg: 'rgba(40,80,0,0.25)'    },
-}
+const RES_CONFIG = [
+  { key:'water',  icon:'💧', label:'WATER',  color:'#2aafcc', low:'#ff2200', fill:'#2aafcc' },
+  { key:'food',   icon:'🌾', label:'FOOD',   color:'#7acc55', low:'#ff2200', fill:'#7acc55' },
+  { key:'energy', icon:'⚡', label:'ENERGY', color:'#ff7722', low:'#ff2200', fill:'#ff7722' },
+  { key:'land',   icon:'🏔', label:'LAND',   color:'#aaaaaa', low:'#ff2200', fill:'#aaaaaa' },
+] as const
 
-// ── Resource bar ──────────────────────────────────────────────────────────────
-function ResourceBar({ label, value, color }: { label: string; value: number; color: string }) {
+const CHART_COLORS: Record<string,string> = {
+  AQUILONIA:'#2aafcc', VERDANTIS:'#7acc55', IGNIS_CORE:'#ff7722', TERRANOVA:'#aaaaaa', THE_NEXUS:'#ffee66',
+}
+const IDS = ['AQUILONIA','VERDANTIS','IGNIS_CORE','TERRANOVA','THE_NEXUS']
+
+// ── Minecraft slot-style resource bar ─────────────────────────────────────────
+function McBar({ label, icon, value, fill }: { label:string; icon:string; value:number; fill:string }) {
   const pct = Math.round(value * 100)
+  const critical = value < 0.25
+  const abundant = value > 0.75
+  const barColor = critical ? '#ff2200' : fill
   return (
-    <div style={{ marginBottom: 3 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#7a8899', marginBottom: 2, fontFamily: 'JetBrains Mono, monospace' }}>
-        <span>{label}</span><span style={{ color }}>{pct}%</span>
+    <div style={{ marginBottom:5 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:2, fontFamily:'"Press Start 2P",monospace', fontSize:6 }}>
+        <span style={{ color:'#aaa' }}>{icon} {label}</span>
+        <span style={{ color: critical?'#ff4422': abundant?'#aaffcc':fill, fontWeight:'bold' }}>
+          {pct}%{critical?' ⚠':''}
+        </span>
       </div>
-      <div style={{ background: '#1a1f2a', borderRadius: 3, height: 5, overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.5s ease' }} />
+      {/* mc-bar-track styled */}
+      <div style={{
+        height:8, background:'#373737',
+        borderTop:'2px solid #1a1a1a', borderLeft:'2px solid #1a1a1a',
+        borderRight:'2px solid #666', borderBottom:'2px solid #666',
+        overflow:'hidden',
+      }}>
+        <div style={{
+          width:`${pct}%`, height:'100%', background:barColor,
+          borderRight: abundant?`1px solid ${fill}`:undefined,
+          transition:'width 0.4s steps(10, end)',
+          boxShadow: abundant?`0 0 6px ${fill}66`:undefined,
+        }} />
       </div>
     </div>
   )
 }
 
-// ── Region card ───────────────────────────────────────────────────────────────
-function RegionCard({ r }: { r: RegionState }) {
-  const meta = NATION_META[r.id]
-  if (!meta) return null
+// ── Resource state badge ──────────────────────────────────────────────────────
+function StateBadge({ label, state }: { label:string; state:'abundant'|'scarce'|'normal' }) {
+  if(state==='normal') return null
+  const cfg = state==='abundant'
+    ? {bg:'#1a3a1a', border:'#44ee44', color:'#66ff66', text:'★ '+label.toUpperCase()}
+    : {bg:'#3a1a1a', border:'#ee4444', color:'#ff6666', text:'▼ '+label.toUpperCase()}
+  return (
+    <span style={{
+      fontFamily:'"Press Start 2P",monospace', fontSize:5, letterSpacing:0,
+      background:cfg.bg, color:cfg.color, padding:'2px 4px',
+      border:`1px solid ${cfg.border}`, marginRight:2, display:'inline-block', marginBottom:2,
+    }}>{cfg.text}</span>
+  )
+}
 
-  const crimePct = Math.round(r.crime_rate * 100)
-  const isHighCrime = r.crime_rate > 0.65
-
+// ── Region card (Minecraft inventory slot) ────────────────────────────────────
+function RegionCard({ r }: { r:RegionState }) {
+  const meta = NATION_META[r.id]; if(!meta) return null
+  const crimePct = Math.round(r.crime_rate*100)
+  const isHighCrime = r.crime_rate>0.65
+  const getBadge = (key:string): 'abundant'|'scarce'|'normal' => {
+    const v = r.resources[key as keyof typeof r.resources]
+    return v>0.72?'abundant':v<0.28?'scarce':'normal'
+  }
   return (
     <div style={{
-      background: meta.bg,
-      border: `1px solid ${meta.color}33`,
-      borderLeft: `3px solid ${meta.color}`,
-      borderRadius: 8, padding: '8px 10px', marginBottom: 8,
+      background: meta.slotBg,
+      borderTop:`2px solid ${meta.slotBorder}88`,
+      borderLeft:`2px solid ${meta.slotBorder}88`,
+      borderRight:`2px solid ${meta.slotBorder}44`,
+      borderBottom:`2px solid ${meta.slotBorder}44`,
+      marginBottom:6, padding:'7px 8px',
     }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-        <span style={{ fontSize: 16 }}>{meta.flag}</span>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: meta.color, fontFamily: 'Inter, sans-serif' }}>{r.name}</div>
-          <div style={{ fontSize: 9, color: '#606880', fontFamily: 'monospace' }}>{r.title} · Tribe: {r.tribe}</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:5 }}>
+        <div>
+          <div style={{ fontFamily:'"Press Start 2P",monospace', fontSize:8, color:meta.color, marginBottom:3 }}>
+            {meta.emoji} {r.name.toUpperCase()}
+          </div>
+          <div style={{ fontFamily:'"Press Start 2P",monospace', fontSize:5, color:meta.color, opacity:0.7, marginBottom:1 }}>
+            {meta.tag}
+          </div>
+          <div style={{ fontFamily:'"Press Start 2P",monospace', fontSize:5, color:'#666' }}>
+            {meta.specialty}
+          </div>
         </div>
         <div style={{
-          fontSize: 9, fontFamily: 'JetBrains Mono, monospace', fontWeight: 600,
-          background: `${ACTION_COLORS[r.last_action]}22`, color: ACTION_COLORS[r.last_action],
-          padding: '2px 5px', borderRadius: 4, border: `1px solid ${ACTION_COLORS[r.last_action]}44`,
+          fontFamily:'"Press Start 2P",monospace', fontSize:7, fontWeight:'bold',
+          color: ACTION_COLORS[r.last_action],
+          background:'#1a1a1a', padding:'3px 5px',
+          borderTop:'2px solid #555', borderLeft:'2px solid #555',
+          borderRight:'2px solid #111', borderBottom:'2px solid #111',
+          whiteSpace:'nowrap',
         }}>
-          {ACTION_ICONS[r.last_action]} {r.last_action}
+          {ACTION_ICONS[r.last_action]}
         </div>
       </div>
 
-      {/* Resources */}
-      <ResourceBar label="💧 Water"  value={r.resources.water}  color="#4A9EFF" />
-      <ResourceBar label="🌾 Food"   value={r.resources.food}   color="#4CAF50" />
-      <ResourceBar label="⚡ Energy" value={r.resources.energy} color="#FF7043" />
-      <ResourceBar label="🏔️ Land"   value={r.resources.land}   color="#A08040" />
+      {/* Resource badges */}
+      <div style={{ marginBottom:5 }}>
+        {(['water','food','energy','land'] as const).map(k=>(
+          <StateBadge key={k} label={k} state={getBadge(k)} />
+        ))}
+      </div>
+
+      {/* Resource bars */}
+      {RES_CONFIG.map(rc=>(
+        <McBar key={rc.key} label={rc.label} icon={rc.icon}
+          value={r.resources[rc.key]} fill={rc.fill} />
+      ))}
 
       {/* Footer */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, fontSize: 9, color: '#606880', fontFamily: 'monospace' }}>
-        <span style={{ color: isHighCrime ? '#ff5555' : '#66cc66' }}>
-          {isHighCrime ? '🚨' : '✅'} {crimePct}% crime
+      <div style={{ display:'flex', justifyContent:'space-between', marginTop:5,
+        fontFamily:'"Press Start 2P",monospace', fontSize:6 }}>
+        <span style={{ color: isHighCrime?'#ff3322':'#44bb44' }}>
+          {isHighCrime?'⚠':''} {crimePct}% CRIME
         </span>
-        <span>👥 {(r.population / 1_000_000).toFixed(1)}M</span>
+        <span style={{ color:'#888' }}>
+          {(r.population/1e6).toFixed(1)}M POP
+        </span>
       </div>
     </div>
   )
 }
 
 // ── Climate banner ────────────────────────────────────────────────────────────
-function ClimateBanner({ event }: { event: ClimateEvent }) {
-  if (!event.type) return null
-  const meta = CLIMATE_META[event.type]
-  if (!meta) return null
-
+function ClimateBanner({ event }: { event:ClimateEvent }) {
+  if(!event.type) return null
+  const meta = CLIMATE_META[event.type]; if(!meta) return null
   return (
     <div style={{
-      background: meta.bg,
-      border: `1px solid ${meta.color}55`,
-      borderRadius: 8, padding: '7px 10px', marginBottom: 10,
-      display: 'flex', alignItems: 'center', gap: 8,
-      animation: 'pulse 1s ease infinite',
+      background:meta.bg, marginBottom:8, padding:'6px 8px',
+      borderTop:`2px solid ${meta.color}`,
+      borderLeft:`2px solid ${meta.color}`,
+      borderRight:`2px solid ${meta.color}44`,
+      borderBottom:`2px solid ${meta.color}44`,
+      animation:'mc-pulse 1s ease infinite',
     }}>
-      <span style={{ fontSize: 18 }}>{meta.icon}</span>
-      <div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: meta.color, fontFamily: 'Inter, sans-serif', letterSpacing: 1 }}>
-          {meta.label} ACTIVE
-        </div>
-        <div style={{ fontSize: 9, color: '#888', fontFamily: 'monospace' }}>
-          {event.duration_remaining} ticks remaining
-        </div>
+      <div style={{ fontFamily:'"Press Start 2P",monospace', fontSize:7, color:meta.color }}>
+        {meta.icon} {meta.label} ACTIVE
+      </div>
+      <div style={{ fontFamily:'"Press Start 2P",monospace', fontSize:5, color:'#888', marginTop:3 }}>
+        {event.duration_remaining} TICKS REMAINING
       </div>
     </div>
   )
 }
 
-// ── Sidebar chart ─────────────────────────────────────────────────────────────
-const CHART_COLORS: Record<string, string> = {
-  AQUILONIA: '#4A9EFF', VERDANTIS: '#4CAF50', IGNIS_CORE: '#FF7043',
-  TERRANOVA: '#A08040', THE_NEXUS: '#AB7FE0',
-}
+// ── Metric chart ──────────────────────────────────────────────────────────────
+type ChartMode = 'crime'|'energy'
 
-function CrimeChart({ history }: { history: { tick: number; [k: string]: number }[] }) {
+function MetricChart({ history, mode }: { history:{tick:number;[k:string]:number}[]; mode:ChartMode }) {
   const data = history.slice(-40)
-  const ids = ['AQUILONIA', 'VERDANTIS', 'IGNIS_CORE', 'TERRANOVA', 'THE_NEXUS']
-  // Remap history keys
-  const mapped = data.map(h => {
-    const row: Record<string, number> = { tick: h.tick }
-    for (const id of ids) row[id] = +(h[id + '_crime'] ?? 0)
+  const suffix = mode==='crime'?'_crime':'_energy'
+  const mapped = data.map(h=>{
+    const row:Record<string,number>={tick:h.tick}
+    for(const id of IDS) row[id]=+(h[id+suffix]??0)
     return row
   })
-
   return (
-    <div style={{ marginTop: 4, height: 90 }}>
-      <div style={{ fontSize: 10, color: '#445566', fontFamily: 'monospace', marginBottom: 4 }}>
-        ↑ CRIME RATE (last 40 ticks)
-      </div>
-      <ResponsiveContainer width="100%" height={75}>
-        <LineChart data={mapped}>
+    <div style={{ height:85 }}>
+      <ResponsiveContainer width="100%" height={85}>
+        <LineChart data={mapped} style={{ background:'transparent' }}>
           <XAxis dataKey="tick" hide />
-          <YAxis domain={[0, 1]} hide />
-          <Tooltip
-            contentStyle={{ background: '#0a0f1a', border: '1px solid #223', fontSize: 9, fontFamily: 'monospace' }}
-            formatter={(v: number) => [`${Math.round(v * 100)}%`]}
-          />
-          {ids.map(id => (
-            <Line key={id} type="monotone" dataKey={id} dot={false}
+          <YAxis domain={[0,1]} hide />
+          <Tooltip contentStyle={{
+            background:'#1a1a1a', border:'2px solid #555',
+            fontFamily:'"Press Start 2P",monospace', fontSize:6, color:'#ccc',
+          }} formatter={(v:number)=>[`${Math.round(v*100)}%`]} />
+          {IDS.map(id=>(
+            <Line key={id} type="stepAfter" dataKey={id} dot={false}
               stroke={CHART_COLORS[id]} strokeWidth={1.5} isAnimationActive={false} />
           ))}
         </LineChart>
@@ -155,73 +209,102 @@ function CrimeChart({ history }: { history: { tick: number; [k: string]: number 
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const regions      = useWorldStore(s => s.regions)
-  const tick         = useWorldStore(s => s.tick)
-  const connected    = useWorldStore(s => s.connected)
-  const isRunning    = useWorldStore(s => s.isRunning)
-  const toggleRun    = useWorldStore(s => s.toggleRunning)
-  const climateEvent = useWorldStore(s => s.climateEvent)
-  const history      = useWorldStore(s => s.history)
+  const regions      = useWorldStore(s=>s.regions)
+  const tick         = useWorldStore(s=>s.tick)
+  const connected    = useWorldStore(s=>s.connected)
+  const isRunning    = useWorldStore(s=>s.isRunning)
+  const toggleRun    = useWorldStore(s=>s.toggleRunning)
+  const climateEvent = useWorldStore(s=>s.climateEvent)
+  const history      = useWorldStore(s=>s.history)
+  const [chartMode, setChartMode] = React.useState<ChartMode>('crime')
 
   return (
     <div style={{
-      width: '100%', height: '100%', overflowY: 'auto', overflowX: 'hidden',
-      background: '#05080f', color: '#c0c8d8', fontFamily: 'Inter, sans-serif',
-      padding: '12px 10px', boxSizing: 'border-box',
+      width:'100%', height:'100%', overflowY:'auto', overflowX:'hidden',
+      // Main Minecraft GUI background — dark stone texture simulation
+      background:'#2a2a2a',
+      borderRight:'4px solid #111',
+      color:'#c0c8d8',
     }}>
-      {/* Header */}
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: '#d0d8f0', letterSpacing: 0.5 }}>
-          🌍 WorldSim 2.0
+      {/* ─── Header ─────────────────────────────────────────────────────── */}
+      <div style={{
+        background:'#1a1a1a', padding:'10px 10px 8px',
+        borderBottom:'3px solid #444',
+      }}>
+        <div style={{ fontFamily:'"Press Start 2P",monospace', fontSize:10, color:'#fcfc54', textShadow:'2px 2px #555', marginBottom:4 }}>
+          ☽ WORLDSIM 2.0
         </div>
-        <div style={{ fontSize: 9, color: '#445566', fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>
-          5 Sovereign Nations · Autonomous RL
+        <div style={{ fontFamily:'"Press Start 2P",monospace', fontSize:6, color:'#888' }}>
+          5 NATIONS · AUTONOMOUS RL
         </div>
       </div>
 
-      {/* Status strip */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10, alignItems: 'center' }}>
+      <div style={{ padding:'8px 8px', boxSizing:'border-box' }}>
+        {/* ─── Status + Controls ────────────────────────────────────────── */}
+        <div style={{ display:'flex', gap:5, marginBottom:8, alignItems:'center' }}>
+          <div style={{
+            flex:1, fontFamily:'"Press Start 2P",monospace', fontSize:6,
+            color: connected?'#44ee88':'#ff4444',
+            background:'#1a1a1a', padding:'4px 6px',
+            borderTop:'2px solid #444', borderLeft:'2px solid #444',
+            borderRight:'2px solid #111', borderBottom:'2px solid #111',
+          }}>
+            {connected?'● LIVE':'○ OFF'} T#{tick}
+          </div>
+          <button
+            className={`mc-btn ${isRunning?'mc-btn-red':'mc-btn-green'}`}
+            onClick={toggleRun}
+          >
+            {isRunning?'⏸ PAUSE':'▶ START'}
+          </button>
+        </div>
+
+        {/* ─── Tribe bonus panel ───────────────────────────────────────── */}
         <div style={{
-          flex: 1, fontSize: 10, fontFamily: 'monospace',
-          color: connected ? '#44ee88' : '#ff5555',
-          background: connected ? 'rgba(68,238,136,0.08)' : 'rgba(255,85,85,0.08)',
-          border: `1px solid ${connected ? '#44ee8844' : '#ff555544'}`,
-          borderRadius: 5, padding: '3px 7px',
+          fontFamily:'"Press Start 2P",monospace', fontSize:5, color:'#888', marginBottom:8,
+          padding:'5px 6px', background:'#1a1a1a',
+          borderTop:'2px solid #444', borderLeft:'2px solid #444',
+          borderRight:'2px solid #111', borderBottom:'2px solid #111',
+          lineHeight:1.8,
         }}>
-          {connected ? '● LIVE' : '○ OFFLINE'} — Tick #{tick.toLocaleString()}
+          IRON TRIBE (AQ+TN): -15% TRADE COST{'\n'}⚡ CRIME &gt;70%: -5% ENERGY/TICK
         </div>
-        <button
-          onClick={toggleRun}
-          style={{
-            background: isRunning ? 'rgba(255,100,100,0.15)' : 'rgba(68,238,136,0.15)',
-            border: `1px solid ${isRunning ? '#ff644444' : '#44ee8844'}`,
-            color: isRunning ? '#ff8888' : '#44ee88',
-            borderRadius: 5, fontSize: 10, fontFamily: 'monospace',
-            padding: '3px 10px', cursor: 'pointer',
-          }}
-        >
-          {isRunning ? '⏸ Pause' : '▶ Resume'}
-        </button>
-      </div>
 
-      {/* Climate event */}
-      <ClimateBanner event={climateEvent} />
+        {/* ─── Climate ─────────────────────────────────────────────────── */}
+        <ClimateBanner event={climateEvent} />
 
-      {/* Tribe info */}
-      <div style={{ fontSize: 9, color: '#334455', fontFamily: 'monospace', marginBottom: 8, padding: '5px 7px', background: 'rgba(255,255,255,0.02)', borderRadius: 5 }}>
-        🏛 Tribe IRON (Aquilonia + Terranova): 15% Trade Bonus
-      </div>
+        {/* ─── Nation inventory slots ───────────────────────────────────── */}
+        {regions.map(r=><RegionCard key={r.id} r={r} />)}
 
-      {/* Nation cards */}
-      {regions.map(r => <RegionCard key={r.id} r={r} />)}
+        {/* ─── Chart toggle ─────────────────────────────────────────────── */}
+        <div style={{ marginTop:6 }}>
+          <div style={{ display:'flex', gap:4, marginBottom:5 }}>
+            {(['crime','energy'] as ChartMode[]).map(m=>(
+              <button key={m}
+                className={`mc-btn ${chartMode===m?'mc-btn-blue':''}`}
+                onClick={()=>setChartMode(m)}
+                style={{ fontSize:6 }}
+              >
+                {m==='crime'?'⚠ CRIME':'⚡ ENRGY'}
+              </button>
+            ))}
+            <span style={{ fontFamily:'"Press Start 2P",monospace', fontSize:5, color:'#555', alignSelf:'center', marginLeft:4 }}>
+              LAST 40 TICKS
+            </span>
+          </div>
+          <MetricChart history={history} mode={chartMode} />
+        </div>
 
-      {/* Crime chart */}
-      <CrimeChart history={history} />
-
-      {/* Legend */}
-      <div style={{ marginTop: 10, fontSize: 9, color: '#334455', fontFamily: 'monospace', lineHeight: 1.8 }}>
-        🛡️ Conserve · 🤝 Trade · ⬆️ Expand · ⚔️ Conflict
-        <br />Energy Entropy: crime &gt;70% → −5% energy/tick
+        {/* ─── Legend ───────────────────────────────────────────────────── */}
+        <div style={{
+          marginTop:8, fontFamily:'"Press Start 2P",monospace', fontSize:5,
+          color:'#555', lineHeight:2, padding:'5px 6px', background:'#1a1a1a',
+          borderTop:'2px solid #333', borderLeft:'2px solid #333',
+          borderRight:'2px solid #111', borderBottom:'2px solid #111',
+        }}>
+          [DEF]=CONSERVE [TRD]=TRADE{'\n'}[EXP]=EXPAND  [WAR]=CONFLICT{'\n'}
+          ★=ABUNDANT(&gt;72%) ▼=SCARCE(&lt;28%)
+        </div>
       </div>
     </div>
   )
