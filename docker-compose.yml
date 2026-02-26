@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: ./worldsim-backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - WORLDSIM_HOST=0.0.0.0
+      - WORLDSIM_PORT=8000
+      - WORLDSIM_RELOAD=false
+      - WORLDSIM_LOG_LEVEL=info
+    networks:
+      - worldsim
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./worldsim-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_WS_URL=ws://localhost:8000/ws
+    depends_on:
+      - backend
+    networks:
+      - worldsim
+
+networks:
+  worldsim:
+    driver: bridge

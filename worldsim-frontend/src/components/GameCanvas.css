@@ -1,0 +1,53 @@
+/* ─── Game Canvas Wrapper ──────────────────────────────────── */
+.game-canvas-container {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  border: 3px solid #00ffff;
+  box-shadow:
+    0 0 0 1px #0a0a20,
+    0 0 25px rgba(0, 255, 255, 0.4),
+    0 0 60px rgba(0, 255, 255, 0.15),
+    inset 0 0 30px rgba(0, 0, 30, 0.8);
+  background: #050510;
+  position: relative;
+}
+
+/* Corner decorations for retro CRT feel */
+.game-canvas-container::before,
+.game-canvas-container::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-color: #ff00ff;
+  border-style: solid;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.game-canvas-container::before {
+  top: 4px;
+  left: 4px;
+  border-width: 2px 0 0 2px;
+}
+
+.game-canvas-container::after {
+  bottom: 4px;
+  right: 4px;
+  border-width: 0 2px 2px 0;
+}
+
+.game-canvas {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.game-canvas canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}

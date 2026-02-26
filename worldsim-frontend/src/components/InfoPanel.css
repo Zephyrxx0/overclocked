@@ -1,0 +1,266 @@
+/* ─── Info Panel ─────────────────────────────────────────────── */
+.info-panel {
+  width: 240px;
+  background: linear-gradient(180deg, #08081a 0%, #060614 100%);
+  border: 2px solid rgba(0, 255, 255, 0.25);
+  border-top: 3px solid rgba(0, 255, 255, 0.5);
+  padding: 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.no-data {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #334455;
+  font-size: 13px;
+  text-align: center;
+  padding: 20px;
+}
+
+.regions-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ─── Region cards ───────────────────────────────────────────── */
+.region-card {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 8px;
+  transition: border-color 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.region-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+
+.region-card[data-region="blue"]::before {
+  background: #4499ff;
+  box-shadow: 0 0 8px #4499ff;
+}
+
+.region-card[data-region="green"]::before {
+  background: #44cc22;
+  box-shadow: 0 0 8px #44cc22;
+}
+
+.region-card[data-region="orange"]::before {
+  background: #ffcc00;
+  box-shadow: 0 0 8px #ffcc00;
+}
+
+.region-card[data-region="brown"]::before {
+  background: #cc6622;
+  box-shadow: 0 0 8px #cc6622;
+}
+
+.region-card[data-region="silver"]::before {
+  background: #cccccc;
+  box-shadow: 0 0 8px #cccccc;
+}
+
+.region-card:hover {
+  border-color: rgba(0, 255, 255, 0.3);
+}
+
+.region-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-left: 6px;
+}
+
+.region-name-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.region-header h4 {
+  margin: 0 0 2px 0;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 5px;
+  color: #ccffee;
+  text-transform: uppercase;
+}
+
+.region-lore {
+  font-size: 9px;
+  color: #8899aa;
+  font-style: italic;
+}
+
+.zone-emoji {
+  font-size: 12px;
+  margin-top: -2px;
+}
+
+/* ─── Resource bars ──────────────────────────────────────────── */
+.resources-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding-left: 6px;
+}
+
+.resource-bar {
+  display: grid;
+  grid-template-columns: 36px 1fr 28px;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.resource-bar label {
+  color: #556677;
+  font-size: 11px;
+}
+
+.bar-container {
+  height: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  position: relative;
+}
+
+.bar-fill {
+  height: 100%;
+  transition: width 0.5s ease;
+  position: relative;
+}
+
+/* Animated tip glow */
+.bar-fill::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: white;
+  opacity: 0.6;
+  filter: blur(1px);
+}
+
+.bar-fill.water {
+  background: linear-gradient(90deg, #004488 0%, #0099ff 100%);
+}
+
+.bar-fill.food {
+  background: linear-gradient(90deg, #004400 0%, #00cc44 100%);
+}
+
+.bar-fill.energy {
+  background: linear-gradient(90deg, #443300 0%, #ffcc00 100%);
+}
+
+.bar-fill.land {
+  background: linear-gradient(90deg, #3a2a10 0%, #8b6f47 100%);
+}
+
+.value {
+  color: #aabbcc;
+  font-size: 10px;
+  text-align: right;
+  font-family: 'Press Start 2P', monospace;
+}
+
+/* ─── Region stats ───────────────────────────────────────────── */
+.region-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 0 5px 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 6px;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.stat span {
+  color: #556677;
+}
+
+.stat strong {
+  color: #00ddbb;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 7px;
+}
+
+.stat strong.positive {
+  color: #00ff44;
+}
+
+.stat strong.negative {
+  color: #ff4444;
+}
+
+/* ─── President RL Action ───────────────────────────────────── */
+.presidential-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-left: 6px;
+  margin-top: 4px;
+}
+
+.tribe-badge {
+  padding: 3px 5px;
+  border: 1px solid;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 5px;
+  text-transform: uppercase;
+}
+
+.pres-reward {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 6px;
+  color: #ffff00;
+  text-shadow: 0 0 4px #aa8800;
+}
+
+/* ─── Panel header ───────────────────────────────────────────── */
+.info-panel-header {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 6px;
+  color: #00ffcc;
+  text-align: center;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid rgba(0, 255, 204, 0.2);
+  text-shadow: 0 0 8px rgba(0, 255, 204, 0.5);
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────── */
+.info-panel::-webkit-scrollbar {
+  width: 3px;
+}
+
+.info-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.info-panel::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 204, 0.3);
+}

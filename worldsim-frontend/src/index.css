@@ -1,0 +1,56 @@
+/* ─── Global Reset ─────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'VT323', 'Courier New', monospace;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: none;
+  image-rendering: pixelated;
+  background-color: #050510;
+  color: #ccffee;
+  overflow: hidden;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+
+/* ─── Pixel Scrollbars ─────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0a0a18; }
+::-webkit-scrollbar-thumb {
+  background: #00ffcc44;
+  border-radius: 0;
+  border: 1px solid #00ffcc;
+}
+::-webkit-scrollbar-thumb:hover { background: #00ffcc99; }
+
+/* ─── Scanline overlay on everything ──────────────────────── */
+body::after {
+  content: '';
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0,0,0,0.08) 2px,
+    rgba(0,0,0,0.08) 4px
+  );
+}

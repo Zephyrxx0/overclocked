@@ -1,0 +1,116 @@
+/* ─── App Shell ────────────────────────────────────────────── */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: #050510;
+}
+
+/* ─── Header ───────────────────────────────────────────────── */
+.app-header {
+  background: linear-gradient(90deg, #050518 0%, #0a0a28 50%, #050518 100%);
+  padding: 10px 20px;
+  border-bottom: 3px solid #00ffff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow:
+    0 0 20px rgba(0, 255, 255, 0.3),
+    0 0 60px rgba(0, 255, 255, 0.1);
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* Pixel scanline on header */
+.app-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(to bottom,
+      transparent 0px, transparent 3px,
+      rgba(0, 255, 255, 0.03) 3px, rgba(0, 255, 255, 0.03) 4px);
+  pointer-events: none;
+}
+
+.app-header h1 {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 13px;
+  margin: 0;
+  color: #00ffff;
+  text-shadow:
+    0 0 10px #00ffff,
+    0 0 30px rgba(0, 255, 255, 0.5),
+    2px 2px 0 #ff00ff;
+  letter-spacing: 1px;
+  animation: titlePulse 3s ease-in-out infinite;
+}
+
+@keyframes titlePulse {
+
+  0%,
+  100% {
+    text-shadow: 0 0 10px #00ffff, 0 0 30px rgba(0, 255, 255, 0.5), 2px 2px 0 #ff00ff;
+  }
+
+  50% {
+    text-shadow: 0 0 20px #00ffff, 0 0 60px rgba(0, 255, 255, 0.8), 2px 2px 0 #ff00ff;
+  }
+}
+
+/* ─── Connection badge ─────────────────────────────────────── */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 7px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 2px solid rgba(0, 255, 255, 0.3);
+  color: #aaffee;
+  letter-spacing: 0.5px;
+}
+
+.status-indicator {
+  width: 10px;
+  height: 10px;
+  background: #ff2222;
+  box-shadow: 0 0 6px #ff2222;
+  animation: ledBlink 1.2s step-end infinite;
+}
+
+.status-indicator.connected {
+  background: #00ff44;
+  box-shadow: 0 0 10px #00ff44, 0 0 20px rgba(0, 255, 68, 0.5);
+  animation: none;
+}
+
+@keyframes ledBlink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.1;
+  }
+}
+
+/* ─── App Body ─────────────────────────────────────────────── */
+.app-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  gap: 0;
+}
+
+.main-area {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  overflow: hidden;
+}
