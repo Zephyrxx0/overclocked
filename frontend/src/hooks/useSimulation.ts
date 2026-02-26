@@ -1,31 +1,4 @@
 import { create } from 'zustand'
-import { io, Socket } from 'socket.io-client'
-
-export interface ResourceState {
-  name: string
-  current: number
-  max: number
-  depletion_rate: number
-  regeneration_rate: number
-}
-
-export interface RegionState {
-  x: number
-  y: number
-  resources: Record<string, ResourceState>
-  has_agent: boolean
-  agent_strategy: string | null
-  climate_events: string[]
-}
-
-export interface AgentState {
-  id: number
-  name: string
-  region_id: number
-  strategy: string
-  resources: Record<string, ResourceState>
-  history_length: number
-}
 
 export interface SimulationState {
   tick: number
@@ -33,8 +6,8 @@ export interface SimulationState {
   width: number
   height: number
   num_agents: number
-  regions: Record<string, RegionState>
-  agents: AgentState[]
+  regions: Record<string, any>
+  agents: any[]
   loading: boolean
   error: string | null
 }
@@ -100,7 +73,6 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
       set({ error: error.message })
     })
 
-    // Store socket for later use
     ;(get() as any).socket = socket
   },
 
