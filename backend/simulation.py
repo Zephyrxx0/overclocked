@@ -43,61 +43,61 @@ logger = logging.getLogger(__name__)
 NATION_PROFILES: List[Dict[str, Any]] = [
     {
         "id":         "AQUILONIA",
-        "name":       "Aquilonia",
-        "title":      "The Fortress",
+        "name":       "The_Hoarder",
+        "title":      "Water Dominance · Hoard & Defend",
         "color_hint": "#4A9EFF",
         "tribe":      "IRON",
         "position":   "NW",
-        # Water-rich start
-        "resources":  {"water": 0.88, "food": 0.55, "energy": 0.52, "land": 0.60},
+        # Water-rich, Energy-poor
+        "resources":  {"water": 0.90, "food": 0.55, "energy": 0.20, "land": 0.60},
         "crime_rate": 0.18,
         "population": 4_800_000,
     },
     {
         "id":         "VERDANTIS",
-        "name":       "Verdantis",
-        "title":      "The Equilibrium",
+        "name":       "The_Sustainist",
+        "title":      "Food Surplus · Balance All 4",
         "color_hint": "#4CAF50",
         "tribe":      "LEAF",
         "position":   "NE",
-        # Food-rich start
-        "resources":  {"water": 0.61, "food": 0.90, "energy": 0.58, "land": 0.65},
+        # Food-rich, Water-poor
+        "resources":  {"water": 0.20, "food": 0.90, "energy": 0.58, "land": 0.65},
         "crime_rate": 0.14,
         "population": 5_200_000,
     },
     {
         "id":         "IGNIS_CORE",
-        "name":       "Ignis Core",
-        "title":      "The Expansionist",
+        "name":       "The_Industrialist",
+        "title":      "Energy Powerhouse · Expand & Burn",
         "color_hint": "#FF7043",
         "tribe":      "FIRE",
         "position":   "CENTER",
-        # Energy-rich start
-        "resources":  {"water": 0.38, "food": 0.48, "energy": 0.92, "land": 0.55},
+        # Energy-rich, Food-poor
+        "resources":  {"water": 0.48, "food": 0.20, "energy": 0.92, "land": 0.55},
         "crime_rate": 0.42,
         "population": 7_100_000,
     },
     {
         "id":         "TERRANOVA",
-        "name":       "Terranova",
-        "title":      "The Parasite",
+        "name":       "The_Opportunist",
+        "title":      "Vast Landmass · Conflict & Steal",
         "color_hint": "#A08040",
         "tribe":      "IRON",       # same tribe as Aquilonia → trade bonus
         "position":   "SW",
-        # Land-rich start
-        "resources":  {"water": 0.42, "food": 0.50, "energy": 0.40, "land": 0.91},
+        # Land-rich, Water-poor
+        "resources":  {"water": 0.20, "food": 0.50, "energy": 0.60, "land": 0.91},
         "crime_rate": 0.61,
         "population": 3_900_000,
     },
     {
         "id":         "THE_NEXUS",
-        "name":       "The Nexus",
-        "title":      "The Collaborator",
+        "name":       "The_Integrator",
+        "title":      "Balanced Hub · Trade & Stability",
         "color_hint": "#AB7FE0",
         "tribe":      "NEXUS",
         "position":   "SE",
         # Balanced start
-        "resources":  {"water": 0.62, "food": 0.63, "energy": 0.61, "land": 0.60},
+        "resources":  {"water": 0.60, "food": 0.60, "energy": 0.60, "land": 0.60},
         "crime_rate": 0.22,
         "population": 6_300_000,
     },
@@ -273,29 +273,36 @@ class NationAgent(mesa.Agent):
         self.crime_rate -= random.uniform(0.005, 0.015)
 
     def _do_trade(self, neighbours: List["NationAgent"]) -> None:
-        """Trade scarce resource for abundant neighbour surplus."""
+        """Trade scarce resource for abundant neighbour surplus.
+        Tribe bonus: same-tribe trade costs 15% less energy.
+        """
         if not neighbours:
             return
-        # Pick partner (prefer tribe-mate for 15% bonus)
+        # Pick partner (prefer tribe-mate for discount)
         tribe_mates = [n for n in neighbours if n.tribe == self.tribe]
         partner: NationAgent = (
             random.choice(tribe_mates) if tribe_mates and random.random() < 0.6
             else random.choice(neighbours)
         )
-        tribe_bonus = 1.15 if partner.tribe == self.tribe else 1.0
 
-        # Find this nation's scarcest resource & partner's most abundant
-        own_min_k   = min(self.resources, key=lambda k: self.resources[k])
-        part_max_k  = max(partner.resources, key=lambda k: partner.resources[k])
+        # Determine scarce/abundant resources BEFORE any modifications
+        own_min_k  = min(self.resources, key=lambda k: self.resources[k])
+        own_max_k  = max(self.resources, key=lambda k: self.resources[k])
+        part_max_k = max(partner.resources, key=lambda k: partner.resources[k])
 
-        gain = random.uniform(0.04, 0.09) * tribe_bonus
+        # 15% reduction in energy trade cost for matching tribes
+        energy_cost = 0.05
+        if partner.tribe == self.tribe:
+            energy_cost *= 0.85
+        self.resources["energy"] = max(0.0, self.resources["energy"] - energy_cost)
+
+        gain = random.uniform(0.04, 0.09)
         cost = random.uniform(0.03, 0.07)
 
-        self.resources[own_min_k]   = min(1.0, self.resources[own_min_k]   + gain)
+        self.resources[own_min_k]     = min(1.0, self.resources[own_min_k]     + gain)
         partner.resources[part_max_k] = max(0.0, partner.resources[part_max_k] - cost * 0.6)
         # Partner gets some of our most abundant in return (fair trade)
-        own_max_k = max(self.resources, key=lambda k: self.resources[k])
-        partner.resources[own_max_k] = min(1.0, partner.resources[own_max_k] + cost * 0.55)
+        partner.resources[own_max_k]  = min(1.0, partner.resources[own_max_k]  + cost * 0.55)
 
         self.crime_rate -= random.uniform(0.003, 0.01)
 
