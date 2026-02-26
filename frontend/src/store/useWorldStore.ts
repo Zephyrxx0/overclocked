@@ -51,7 +51,8 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
     // Already have a live connection — skip
     if (_ws && (_ws.readyState === WebSocket.OPEN || _ws.readyState === WebSocket.CONNECTING)) return
 
-    _ws = new WebSocket('ws://localhost:8000/ws/world-state')
+    const wsUrl = (import.meta.env.VITE_WS_URL as string) ?? 'ws://localhost:8000/ws/world-state'
+    _ws = new WebSocket(wsUrl)
 
     _ws.onopen = () => set({ connected: true })
 
