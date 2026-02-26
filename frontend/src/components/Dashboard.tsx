@@ -8,11 +8,11 @@ const NATION_META: Record<string, {
   color:string; slotBg:string; slotBorder:string
   signatureResource:string; scarceResource:string
 }> = {
-  AQUILONIA:  { emoji:'💧', tag:'Water Dominance',   specialty:'Hoard & Defend',    tribe:'IRON',  color:'#2aafcc', slotBg:'#0a2030', slotBorder:'#2aafcc', signatureResource:'water',  scarceResource:'energy' },
-  VERDANTIS:  { emoji:'🌾', tag:'Food Surplus',      specialty:'Balance All 4',     tribe:'LEAF',  color:'#7acc55', slotBg:'#0a1e08', slotBorder:'#7acc55', signatureResource:'food',   scarceResource:'water'  },
-  IGNIS_CORE: { emoji:'⚡', tag:'Energy Powerhouse', specialty:'Expand & Burn',     tribe:'FIRE',  color:'#ff7722', slotBg:'#1e0a02', slotBorder:'#ff7722', signatureResource:'energy', scarceResource:'food'   },
-  TERRANOVA:  { emoji:'🪨', tag:'Vast Landmass',     specialty:'Conflict & Steal',  tribe:'IRON',  color:'#aaaaaa', slotBg:'#141414', slotBorder:'#aaaaaa', signatureResource:'land',   scarceResource:'water'  },
-  THE_NEXUS:  { emoji:'⚖️', tag:'Balanced Hub',      specialty:'Trade & Stability', tribe:'NEXUS', color:'#ffee66', slotBg:'#1a1608', slotBorder:'#ffee66', signatureResource:'water',  scarceResource:'land'   },
+  AQUILONIA:  { emoji:'💧', tag:'The_Hoarder',       specialty:'Hoard & Defend',    tribe:'IRON',  color:'#2aafcc', slotBg:'#0a2030', slotBorder:'#2aafcc', signatureResource:'water',  scarceResource:'energy' },
+  VERDANTIS:  { emoji:'🌾', tag:'The_Sustainist',    specialty:'Balance All 4',     tribe:'LEAF',  color:'#7acc55', slotBg:'#0a1e08', slotBorder:'#7acc55', signatureResource:'food',   scarceResource:'water'  },
+  IGNIS_CORE: { emoji:'⚡', tag:'The_Industrialist', specialty:'Expand & Burn',     tribe:'FIRE',  color:'#ff7722', slotBg:'#1e0a02', slotBorder:'#ff7722', signatureResource:'energy', scarceResource:'food'   },
+  TERRANOVA:  { emoji:'🪨', tag:'The_Opportunist',   specialty:'Conflict & Steal',  tribe:'IRON',  color:'#aaaaaa', slotBg:'#141414', slotBorder:'#aaaaaa', signatureResource:'land',   scarceResource:'water'  },
+  THE_NEXUS:  { emoji:'⚖️', tag:'The_Integrator',   specialty:'Trade & Stability', tribe:'NEXUS', color:'#ffee66', slotBg:'#1a1608', slotBorder:'#ffee66', signatureResource:'water',  scarceResource:'land'   },
 }
 
 const ACTION_COLORS: Record<string,string> = { Conserve:'#44aaff', Trade:'#44ee88', Expand:'#ffcc44', Conflict:'#ff5544' }

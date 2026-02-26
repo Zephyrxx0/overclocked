@@ -76,26 +76,7 @@ export default function App() {
           <GameView />
         </div>
 
-        {/* Legend */}
-        <div style={{
-          position:'absolute', bottom:12, left:12, zIndex:10,
-          background:'rgba(2,5,12,0.82)', border:'1px solid #151e2a', backdropFilter:'blur(6px)',
-          borderRadius:10, padding:'8px 10px', display:'flex', flexDirection:'column', gap:4,
-        }}>
-          {[
-            ['AQUILONIA',  '#4A9EFF', '🛡️ Fortress · Water-rich'],
-            ['VERDANTIS',  '#4CAF50', '🌿 Equilibrium · Food-rich'],
-            ['IGNIS CORE', '#FF7043', '🔥 Expansionist · Energy-rich'],
-            ['TERRANOVA',  '#A08040', '⚔️ Parasite · Land-rich'],
-            ['THE NEXUS',  '#AB7FE0', '🔮 Collaborator · Balanced'],
-          ].map(([name, color, desc]) => (
-            <div key={name} style={{ display:'flex', alignItems:'center', gap:7 }}>
-              <div style={{ width:9, height:9, borderRadius:2, background:color, flexShrink:0 }} />
-              <span style={{ fontSize:10, color:'#b0b8c8', fontFamily:'Inter, sans-serif', fontWeight:600 }}>{name}</span>
-              <span style={{ fontSize:9, color:'#445566' }}>{desc}</span>
-            </div>
-          ))}
-        </div>
+
 
         {/* Paused overlay */}
         {!isRunning && (
