@@ -4,7 +4,6 @@
 
 WorldSim is an agent-based simulation engine where autonomous AI agents govern distinct world regions, each with finite natural resources. Agents learn survival strategies through Q-learning reinforcement learning as the world evolves — resources deplete, climate events reshape availability, and populations grow, migrate, or perish.
 
-![System Design](system-design.png)
 
 ---
 
