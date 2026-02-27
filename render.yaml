@@ -1,0 +1,23 @@
+services:
+  # ── Backend (FastAPI WebSocket) ──────────────────────────────────────────────
+  - type: web
+    name: worldsim-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: PORT
+        value: 8000
+    plan: free
+
+  # ── Frontend (Vite/React static site) ────────────────────────────────────────
+  - type: web
+    name: worldsim-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_WS_URL
+        sync: false # Set manually in Render dashboard → backend wss:// URL
