@@ -96,7 +96,11 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   async toggleRunning() {
     const running = !get().isRunning
     try {
-      await fetch('http://localhost:8000/control', {
+      // Derive HTTP API URL from WS URL (ws:// -> http://, wss:// -> https://)
+      const wsUrl = (import.meta.env.VITE_WS_URL as string) ?? 'ws://localhost:8000/ws/world-state'
+      const apiUrl = wsUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws/world-state', '')
+      
+      await fetch(`${apiUrl}/control`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: running ? 'start' : 'stop' }),
